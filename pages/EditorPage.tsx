@@ -1,23 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, ArrowLeft, Download, Save } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
+import { Sparkles, ArrowLeft, Download, Save, Sun } from "lucide-react";
 import Link from "next/link";
 import { ImageUpload } from "@/components/image-upload";
 import { ImageGenerator } from "@/components/image-generator";
 import EditingToolsPanel from "@/components/editing-tools-panel";
 import SelectionCanvas from "@/components/selection-canvas";
+import TextOverlay from "@/components/text-overlay";
+import CropCanvas from "@/components/crop-canvas";
 import type { AnalyzeCommandResponse } from "@/lib/gemini-service";
 import type { ProcessedImage } from "@/lib/image-processing-service";
 import CommandInterface from "@/components/command-interface";
 import ProcessingModal from "@/components/processing-modal";
+import { parseCommand } from "@/lib/command-parser";
+import {
+  applyColorAdjustments,
+  rotateImage,
+  flipImage,
+  addTextToImage,
+} from "@/lib/local-image-processing";
+import { cropImage, resizeImageDimensions, scaleImage } from "@/lib/crop-utils";
 
 interface UploadedImage {
   id: string;
   file: File;
   url: string;
+  originalUrl?: string; // Store original URL for reset
+  originalFile?: File; // Store original File for blob URL recreation
   name: string;
   size: number;
   type: string;
@@ -47,19 +63,143 @@ export default function EditorPage() {
   >("pen");
   const [currentSelection, setCurrentSelection] = useState<any>(null);
 
+  // Edit mode: manual (sliders) or ai (text commands)
+  const [editMode, setEditMode] = useState<"manual" | "ai">("manual");
+
+  // Text layers management
+  const [textLayers, setTextLayers] = useState<
+    Array<{
+      id: string;
+      text: string;
+      x: number;
+      y: number;
+      fontSize: number;
+      color: string;
+      fontFamily: string;
+      bold: boolean;
+    }>
+  >([]);
+  const [selectedTextLayerId, setSelectedTextLayerId] = useState<string | null>(
+    null
+  );
+  const [showTextOverlay, setShowTextOverlay] = useState(true);
+
+  // Crop and Resize states
+  const [showCropCanvas, setShowCropCanvas] = useState(false);
+  const [showResizeModal, setShowResizeModal] = useState(false);
+  const [resizeWidth, setResizeWidth] = useState<number>(0);
+  const [resizeHeight, setResizeHeight] = useState<number>(0);
+  const [resizeScale, setResizeScale] = useState<number>(100);
+  const [maintainAspectRatio, setMaintainAspectRatio] = useState(true);
+
+  // Load images from IndexedDB on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const loadFromDB = async () => {
+      try {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open("LumenFrameDB", 1);
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result);
+          request.onupgradeneeded = (e) => {
+            const db = (e.target as IDBOpenDBRequest).result;
+            if (!db.objectStoreNames.contains("images")) {
+              db.createObjectStore("images", { keyPath: "id" });
+            }
+          };
+        });
+
+        const transaction = db.transaction(["images"], "readonly");
+        const store = transaction.objectStore("images");
+        const request = store.getAll();
+
+        request.onsuccess = () => {
+          const images = request.result;
+          if (images.length > 0) {
+            setUploadedImages(images);
+            setSelectedImage(images[0]);
+          }
+        };
+      } catch (e) {
+        console.error("Failed to load images from IndexedDB:", e);
+      }
+    };
+
+    loadFromDB();
+  }, []);
+
+  // Save images to IndexedDB whenever they change
+  useEffect(() => {
+    if (typeof window === "undefined" || uploadedImages.length === 0) return;
+
+    const saveToDB = async () => {
+      try {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open("LumenFrameDB", 1);
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result);
+          request.onupgradeneeded = (e) => {
+            const db = (e.target as IDBOpenDBRequest).result;
+            if (!db.objectStoreNames.contains("images")) {
+              db.createObjectStore("images", { keyPath: "id" });
+            }
+          };
+        });
+
+        const transaction = db.transaction(["images"], "readwrite");
+        const store = transaction.objectStore("images");
+
+        // Clear existing and save new
+        await new Promise<void>((resolve, reject) => {
+          const clearReq = store.clear();
+          clearReq.onsuccess = () => resolve();
+          clearReq.onerror = () => reject(clearReq.error);
+        });
+
+        // Save each image
+        for (const img of uploadedImages) {
+          await new Promise<void>((resolve, reject) => {
+            const saveReq = store.add({
+              id: img.id,
+              url: img.url,
+              originalUrl: img.originalUrl,
+              name: img.name,
+              size: img.size,
+              type: img.type,
+              dimensions: img.dimensions,
+              isGenerated: img.isGenerated,
+              isProcessed: img.isProcessed,
+            });
+            saveReq.onsuccess = () => resolve();
+            saveReq.onerror = () => reject(saveReq.error);
+          });
+        }
+      } catch (e) {
+        console.error("Failed to save images to IndexedDB:", e);
+      }
+    };
+
+    saveToDB();
+  }, [uploadedImages]);
   const handleImageUpload = (files: File[]) => {
     if (!files || !Array.isArray(files) || files.length === 0) {
       return;
     }
 
-    const newImages: UploadedImage[] = files.map((file) => ({
-      id: Math.random().toString(36).substr(2, 9),
-      file,
-      url: URL.createObjectURL(file),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-    }));
+    const newImages: UploadedImage[] = files.map((file) => {
+      const url = URL.createObjectURL(file);
+      return {
+        id: Math.random().toString(36).substr(2, 9),
+        file,
+        url,
+        originalUrl: url, // Store original URL for reset
+        originalFile: file, // Store original File for blob URL recreation
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      };
+    });
 
     setUploadedImages((prev) => [...prev, ...newImages]);
 
@@ -86,6 +226,15 @@ export default function EditorPage() {
     command: string,
     analysis: AnalyzeCommandResponse
   ) => {
+    // First, try local command parsing
+    const parsed = parseCommand(command);
+    if (parsed && parsed.confidence > 0.5) {
+      // Use local processing for high-confidence commands
+      await handleApplyEdit(parsed.type, parsed.params);
+      return;
+    }
+
+    // Fallback to API-based processing if local parsing confidence is low
     setCurrentAnalysis(analysis);
 
     if (
@@ -262,149 +411,238 @@ export default function EditorPage() {
   const handleApplyEdit = async (editType: string, params: any) => {
     if (!selectedImage) return;
 
-    let command = "";
+    try {
+      let processedUrl: string | null = null;
 
-    switch (editType) {
-      case "crop":
-        command = `Crop the image to ${params.width}% width and ${params.height}% height`;
-        break;
-      case "resize":
-        command = `Resize the image to ${params.width}% of original size`;
-        break;
-      case "rotate":
-        command = `Rotate the image ${params.degrees} degrees`;
-        break;
-      case "flip":
-        command = `Flip the image ${params.direction}ly`;
-        break;
-      case "basic-adjustments":
-        const adjustments = [];
-        if (params.brightness !== 0)
-          adjustments.push(
-            `brightness ${
-              params.brightness > 0 ? "increased" : "decreased"
-            } by ${Math.abs(params.brightness)}`
+      // Handle local image processing
+      switch (editType) {
+        case "basic-adjustments":
+          // Apply brightness, contrast, exposure, highlights, shadows
+          processedUrl = await applyColorAdjustments(selectedImage.url, {
+            brightness: params.brightness,
+            contrast: params.contrast,
+            exposure: params.exposure,
+            highlights: params.highlights,
+            shadows: params.shadows,
+          });
+          break;
+
+        case "color-adjustments":
+          // Apply color adjustments
+          processedUrl = await applyColorAdjustments(selectedImage.url, {
+            saturation: params.saturation,
+            vibrance: params.vibrance,
+            hue: params.hue,
+            temperature: params.temperature,
+            tint: params.tint,
+          });
+          break;
+
+        case "rotate":
+          processedUrl = await rotateImage(selectedImage.url, params.degrees);
+          break;
+
+        case "flip":
+          processedUrl = await flipImage(
+            selectedImage.url,
+            params.direction as "horizontal" | "vertical"
           );
-        if (params.contrast !== 0)
-          adjustments.push(
-            `contrast ${
-              params.contrast > 0 ? "increased" : "decreased"
-            } by ${Math.abs(params.contrast)}`
-          );
-        if (params.exposure !== 0)
-          adjustments.push(
-            `exposure ${
-              params.exposure > 0 ? "increased" : "decreased"
-            } by ${Math.abs(params.exposure)}`
-          );
-        if (params.highlights !== 0)
-          adjustments.push(
-            `highlights ${
-              params.highlights > 0 ? "increased" : "decreased"
-            } by ${Math.abs(params.highlights)}`
-          );
-        if (params.shadows !== 0)
-          adjustments.push(
-            `shadows ${
-              params.shadows > 0 ? "increased" : "decreased"
-            } by ${Math.abs(params.shadows)}`
-          );
-        command = `Adjust the image with ${adjustments.join(", ")}`;
-        break;
-      case "color-adjustments":
-        const colorAdjustments = [];
-        if (params.saturation !== 0)
-          colorAdjustments.push(
-            `saturation ${
-              params.saturation > 0 ? "increased" : "decreased"
-            } by ${Math.abs(params.saturation)}`
-          );
-        if (params.vibrance !== 0)
-          colorAdjustments.push(
-            `vibrance ${
-              params.vibrance > 0 ? "increased" : "decreased"
-            } by ${Math.abs(params.vibrance)}`
-          );
-        if (params.hue !== 0)
-          colorAdjustments.push(`hue shifted by ${params.hue} degrees`);
-        if (params.temperature !== 0)
-          colorAdjustments.push(
-            `temperature ${
-              params.temperature > 0 ? "warmer" : "cooler"
-            } by ${Math.abs(params.temperature)}`
-          );
-        if (params.tint !== 0)
-          colorAdjustments.push(
-            `tint ${
-              params.tint > 0 ? "more magenta" : "more green"
-            } by ${Math.abs(params.tint)}`
-          );
-        command = `Adjust the colors with ${colorAdjustments.join(", ")}`;
-        break;
-      case "add-text":
-        command = `Add the text "${params.text}" with font size ${params.fontSize}px to the image`;
-        break;
-      case "3d-transform":
-        const transforms = [];
-        if (params.warp !== 0) transforms.push(`warp intensity ${params.warp}`);
-        if (params.skewX !== 0)
-          transforms.push(`skew horizontally by ${params.skewX} degrees`);
-        if (params.skewY !== 0)
-          transforms.push(`skew vertically by ${params.skewY} degrees`);
-        if (params.perspectiveX !== 0)
-          transforms.push(
-            `perspective X transformation ${params.perspectiveX}`
-          );
-        if (params.perspectiveY !== 0)
-          transforms.push(
-            `perspective Y transformation ${params.perspectiveY}`
-          );
-        command =
-          transforms.length > 0
-            ? `Apply 3D transformation with ${transforms.join(", ")}`
-            : "Apply 3D transformation to the image";
-        break;
-      case "add-shape":
-        command = `Add a ${params.type} shape to the image`;
-        break;
-      case "add-frame":
-        command = `Add a ${params.type} frame around the image`;
-        break;
-      case "add-emoji":
-        command = `Add the ${params.emoji} emoji to the image`;
-        break;
-      case "start-selection":
-        setSelectionMode(params.mode);
-        setIsSelecting(true);
-        return;
-      case "apply-to-selection":
-        if (!currentSelection) {
-          alert("Please make a selection first");
+          break;
+
+        case "add-text": {
+          // Check if updating existing text or creating new one
+          let textId = params.id;
+
+          // If no ID is provided, create new one (new text)
+          if (!textId) {
+            textId = `text-${Date.now()}`;
+          }
+
+          const newTextLayer = {
+            id: textId,
+            text: params.text,
+            x: params.x,
+            y: params.y,
+            fontSize: params.fontSize,
+            color: params.color,
+            fontFamily: params.fontFamily,
+            bold: params.bold,
+          };
+
+          // Update or add text layer
+          let updatedLayers = textLayers.filter((t) => t.id !== textId);
+          updatedLayers.push(newTextLayer);
+          setTextLayers(updatedLayers);
+          setSelectedTextLayerId(textId);
+
+          // Don't apply directly to image - layers are rendered as overlay
           return;
         }
-        command = `Apply the following edit to the selected area (${currentSelection.type} selection at coordinates ${currentSelection.bounds.x},${currentSelection.bounds.y} with size ${currentSelection.bounds.width}x${currentSelection.bounds.height}): ${params.command}`;
-        break;
-      default:
-        return;
-    }
 
-    try {
-      const response = await fetch("/api/analyze-command", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command, hasImage: true }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Analysis failed: ${response.status}`);
+        default:
+          console.log("Edit type not yet implemented locally:", editType);
+          return;
       }
 
-      const analysis = await response.json();
-      if (analysis.success) {
-        await handleCommandSubmit(command, analysis);
+      if (processedUrl) {
+        // Update the selected image with the processed URL
+        const updatedImage: UploadedImage = {
+          ...selectedImage,
+          url: processedUrl,
+          isProcessed: true,
+        };
+
+        // Update in the images list
+        setUploadedImages((prev) =>
+          prev.map((img) => (img.id === selectedImage.id ? updatedImage : img))
+        );
+
+        // Update selected image
+        setSelectedImage(updatedImage);
+
+        console.log("Image processing completed successfully");
       }
     } catch (error) {
       console.error("Edit application failed:", error);
+      alert(
+        `Failed to apply edit: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  };
+
+  const handleResetBasicAdjustments = () => {
+    console.log("Reset Basic - selectedImage:", selectedImage);
+    if (!selectedImage) {
+      console.warn("No selectedImage!");
+      return;
+    }
+
+    // Create fresh blob URL from original file if available
+    let resetUrl = selectedImage.originalUrl;
+    if (selectedImage.originalFile) {
+      resetUrl = URL.createObjectURL(selectedImage.originalFile);
+      console.log("Created fresh blob URL from original file:", resetUrl);
+    }
+
+    if (!resetUrl) {
+      console.warn("No original URL or file found!");
+      return;
+    }
+
+    const resetImage = { ...selectedImage, url: resetUrl };
+    console.log("Reset Basic - resetting to:", resetImage);
+    setSelectedImage(resetImage);
+
+    // Update in database
+    setUploadedImages((prev) =>
+      prev.map((img) => (img.id === selectedImage.id ? resetImage : img))
+    );
+  };
+
+  const handleResetColorControls = () => {
+    if (!selectedImage) return;
+
+    // Create fresh blob URL from original file if available
+    let resetUrl = selectedImage.originalUrl;
+    if (selectedImage.originalFile) {
+      resetUrl = URL.createObjectURL(selectedImage.originalFile);
+    }
+
+    if (!resetUrl) return;
+
+    const resetImage = { ...selectedImage, url: resetUrl };
+    setSelectedImage(resetImage);
+    setUploadedImages((prev) =>
+      prev.map((img) => (img.id === selectedImage.id ? resetImage : img))
+    );
+  };
+
+  const handleReset3DTransform = () => {
+    if (!selectedImage) return;
+
+    // Create fresh blob URL from original file if available
+    let resetUrl = selectedImage.originalUrl;
+    if (selectedImage.originalFile) {
+      resetUrl = URL.createObjectURL(selectedImage.originalFile);
+    }
+
+    if (!resetUrl) return;
+
+    const resetImage = { ...selectedImage, url: resetUrl };
+    setSelectedImage(resetImage);
+    setUploadedImages((prev) =>
+      prev.map((img) => (img.id === selectedImage.id ? resetImage : img))
+    );
+  };
+
+  const handleCropComplete = async (
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ) => {
+    if (!selectedImage) return;
+
+    try {
+      const croppedUrl = await cropImage(
+        selectedImage.url,
+        x,
+        y,
+        width,
+        height
+      );
+
+      const updatedImage: UploadedImage = {
+        ...selectedImage,
+        url: croppedUrl,
+        isProcessed: true,
+      };
+
+      setUploadedImages((prev) =>
+        prev.map((img) => (img.id === selectedImage.id ? updatedImage : img))
+      );
+      setSelectedImage(updatedImage);
+      setShowCropCanvas(false);
+    } catch (error) {
+      console.error("Crop failed:", error);
+      alert("Failed to crop image");
+    }
+  };
+
+  const handleResizeApply = async () => {
+    if (!selectedImage) return;
+
+    try {
+      let resizedUrl: string;
+
+      if (resizeScale !== 100) {
+        // Use scale
+        resizedUrl = await scaleImage(selectedImage.url, resizeScale);
+      } else {
+        // Use specific dimensions
+        resizedUrl = await resizeImageDimensions(
+          selectedImage.url,
+          resizeWidth,
+          resizeHeight
+        );
+      }
+
+      const updatedImage: UploadedImage = {
+        ...selectedImage,
+        url: resizedUrl,
+        isProcessed: true,
+      };
+
+      setUploadedImages((prev) =>
+        prev.map((img) => (img.id === selectedImage.id ? updatedImage : img))
+      );
+      setSelectedImage(updatedImage);
+      setShowResizeModal(false);
+    } catch (error) {
+      console.error("Resize failed:", error);
+      alert("Failed to resize image");
     }
   };
 
@@ -529,264 +767,426 @@ export default function EditorPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Link href="/">
-                <Button variant="ghost" size="sm">
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Back
-                </Button>
-              </Link>
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                  <Sparkles className="w-5 h-5 text-primary-foreground" />
+    <>
+      {/* Crop Canvas Modal */}
+      {showCropCanvas && selectedImage && (
+        <CropCanvas
+          imageUrl={selectedImage.url}
+          onCropComplete={handleCropComplete}
+          onCancel={() => setShowCropCanvas(false)}
+        />
+      )}
+
+      {/* Resize Modal */}
+      {showResizeModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold mb-4">Resize Image</h3>
+
+            <div className="space-y-4">
+              <div>
+                <Label>Scale (%)</Label>
+                <Slider
+                  value={[resizeScale]}
+                  onValueChange={(value: number[]) => {
+                    setResizeScale(value[0]);
+                  }}
+                  min={10}
+                  max={200}
+                  step={5}
+                  className="mt-2"
+                />
+                <p className="text-sm text-muted-foreground mt-2">
+                  {resizeScale}% of original size
+                </p>
+              </div>
+
+              <Separator />
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Width (px)</Label>
+                  <Input
+                    type="number"
+                    value={resizeWidth}
+                    onChange={(e) =>
+                      setResizeWidth(parseInt(e.target.value) || 0)
+                    }
+                    min={50}
+                    className="mt-2"
+                  />
                 </div>
-                <h1 className="text-2xl font-bold text-foreground">
-                  LumenFrame
-                </h1>
-                <Badge variant="secondary" className="ml-2">
-                  Editor
-                </Badge>
-                {currentAnalysis && (
-                  <Badge variant="outline" className="ml-2">
-                    Analysis Ready
-                  </Badge>
-                )}
-                {processedImages.length > 0 && (
-                  <Badge variant="outline" className="ml-2">
-                    {processedImages.length} Processed
-                  </Badge>
-                )}
+                <div>
+                  <Label>Height (px)</Label>
+                  <Input
+                    type="number"
+                    value={resizeHeight}
+                    onChange={(e) =>
+                      setResizeHeight(parseInt(e.target.value) || 0)
+                    }
+                    min={50}
+                    className="mt-2"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="aspect-ratio"
+                  checked={maintainAspectRatio}
+                  onChange={(e) => setMaintainAspectRatio(e.target.checked)}
+                  className="rounded"
+                />
+                <Label htmlFor="aspect-ratio" className="text-sm">
+                  Maintain aspect ratio
+                </Label>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Link href="/demo">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  Watch Demo
-                </Button>
-              </Link>
-              <Button variant="outline" size="sm" onClick={handleSaveProject}>
-                <Save className="w-4 h-4 mr-2" />
-                Save Project
-              </Button>
+
+            <div className="flex gap-3 justify-end mt-6">
               <Button
-                size="sm"
-                onClick={handleExport}
-                disabled={!selectedImage}
+                variant="outline"
+                onClick={() => setShowResizeModal(false)}
               >
-                <Download className="w-4 h-4 mr-2" />
-                Export
+                Cancel
               </Button>
+              <Button onClick={handleResizeApply}>Apply Resize</Button>
             </div>
           </div>
         </div>
-      </header>
-
-      <div className="flex h-[calc(100vh-73px)]">
-        <div className="w-80 border-r border-border bg-card/30 flex flex-col">
-          <div className="p-4 border-b border-border">
-            <h2 className="font-semibold text-foreground mb-2">
-              Image Library
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Upload and manage your images
-            </p>
-
-            <div className="flex gap-2 mt-3">
-              <Button
-                variant={!isGenerationMode ? "default" : "outline"}
-                size="sm"
-                onClick={() => setIsGenerationMode(false)}
-                className="flex-1"
-              >
-                Upload
-              </Button>
-              <Button
-                variant={isGenerationMode ? "default" : "outline"}
-                size="sm"
-                onClick={() => setIsGenerationMode(true)}
-                className="flex-1"
-              >
-                Generate
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4">
-            {isGenerationMode ? (
-              <ImageGenerator
-                onImageGenerated={handleImageGenerated}
-                isGenerating={isGenerating}
-              />
-            ) : uploadedImages.length === 0 ? (
-              <ImageUpload onImageUpload={handleImageUpload} />
-            ) : (
-              <div className="space-y-4">
-                <ImageUpload onImageUpload={handleImageUpload} compact />
-
-                <div className="space-y-2">
-                  <h3 className="text-sm font-medium text-foreground">
-                    Uploaded Images ({uploadedImages.length})
-                  </h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    {uploadedImages?.map((image) => (
-                      <div
-                        key={image.id}
-                        className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
-                          selectedImage?.id === image.id
-                            ? "border-primary ring-2 ring-primary/20"
-                            : "border-border hover:border-accent"
-                        }`}
-                        onClick={() => handleImageSelect(image)}
-                      >
-                        <div className="aspect-square bg-muted flex items-center justify-center">
-                          <img
-                            src={image.url || "/placeholder.svg"}
-                            alt={image.name}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                        {image.isGenerated && (
-                          <div className="absolute top-1 left-1">
-                            <Badge variant="secondary" className="text-xs">
-                              AI
-                            </Badge>
-                          </div>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleImageRemove(image.id);
-                          }}
-                          className="absolute top-1 right-1 w-6 h-6 bg-destructive/80 hover:bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          type="button"
-                          aria-label="Remove image"
-                        >
-                          ×
-                        </button>
-                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                          <p className="text-xs text-white truncate">
-                            {image.name}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
+      )}
+      <div className="min-h-screen bg-background">
+        <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+          <div className="container mx-auto px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <Link href="/">
+                  <Button variant="ghost" size="sm">
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Back
+                  </Button>
+                </Link>
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+                    <Sparkles className="w-5 h-5 text-primary-foreground" />
                   </div>
+                  <h1 className="text-2xl font-bold text-foreground">
+                    LumenFrame
+                  </h1>
+                  <Badge variant="secondary" className="ml-2">
+                    Editor
+                  </Badge>
+                  {currentAnalysis && (
+                    <Badge variant="outline" className="ml-2">
+                      Analysis Ready
+                    </Badge>
+                  )}
+                  {processedImages.length > 0 && (
+                    <Badge variant="outline" className="ml-2">
+                      {processedImages.length} Processed
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Edit Mode Toggle */}
+                <div className="flex items-center gap-1 bg-muted p-1 rounded-lg">
+                  <Button
+                    size="sm"
+                    variant={editMode === "manual" ? "default" : "ghost"}
+                    onClick={() => setEditMode("manual")}
+                    className="gap-2"
+                  >
+                    <Sun className="w-4 h-4" />
+                    Manual
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={editMode === "ai" ? "default" : "ghost"}
+                    onClick={() => setEditMode("ai")}
+                    className="gap-2"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    AI
+                  </Button>
                 </div>
 
-                {processedImages.length > 0 && (
+                <Link href="/demo">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Watch Demo
+                  </Button>
+                </Link>
+                <Button variant="outline" size="sm" onClick={handleSaveProject}>
+                  <Save className="w-4 h-4 mr-2" />
+                  Save Project
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleExport}
+                  disabled={!selectedImage}
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
+                </Button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="flex h-[calc(100vh-73px)]">
+          <div className="w-80 border-r border-border bg-card/30 flex flex-col">
+            <div className="p-4 border-b border-border">
+              <h2 className="font-semibold text-foreground mb-2">
+                Image Library
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Upload and manage your images
+              </p>
+
+              <div className="flex gap-2 mt-3">
+                <Button
+                  variant={!isGenerationMode ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setIsGenerationMode(false)}
+                  className="flex-1"
+                >
+                  Upload
+                </Button>
+                <Button
+                  variant={isGenerationMode ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setIsGenerationMode(true)}
+                  className="flex-1"
+                >
+                  Generate
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              {isGenerationMode ? (
+                <ImageGenerator
+                  onImageGenerated={handleImageGenerated}
+                  isGenerating={isGenerating}
+                />
+              ) : uploadedImages.length === 0 ? (
+                <ImageUpload onImageUpload={handleImageUpload} />
+              ) : (
+                <div className="space-y-4">
+                  <ImageUpload onImageUpload={handleImageUpload} compact />
+
                   <div className="space-y-2">
                     <h3 className="text-sm font-medium text-foreground">
-                      Processed Images ({processedImages.length})
+                      Uploaded Images ({uploadedImages.length})
                     </h3>
                     <div className="grid grid-cols-2 gap-2">
-                      {processedImages?.map((processed) => (
+                      {uploadedImages?.map((image) => (
                         <div
-                          key={processed.id}
+                          key={image.id}
                           className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
-                            selectedImage?.id === `processed-${processed.id}`
+                            selectedImage?.id === image.id
                               ? "border-primary ring-2 ring-primary/20"
-                              : "border-accent hover:border-primary/50"
+                              : "border-border hover:border-accent"
                           }`}
-                          onClick={() => handleProcessedImageSelect(processed)}
+                          onClick={() => handleImageSelect(image)}
                         >
                           <div className="aspect-square bg-muted flex items-center justify-center">
                             <img
-                              src={
-                                processed.processedImageUrl ||
-                                "/placeholder.svg"
-                              }
-                              alt={`Processed: ${processed.originalImageName}`}
+                              src={image.url || "/placeholder.svg"}
+                              alt={image.name}
                               className="w-full h-full object-cover"
                             />
                           </div>
-                          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                          {image.isGenerated && (
+                            <div className="absolute top-1 left-1">
+                              <Badge variant="secondary" className="text-xs">
+                                AI
+                              </Badge>
+                            </div>
+                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleImageRemove(image.id);
+                            }}
+                            className="absolute top-1 right-1 w-6 h-6 bg-destructive/80 hover:bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            type="button"
+                            aria-label="Remove image"
+                          >
+                            ×
+                          </button>
+                          <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/60 to-transparent p-2">
                             <p className="text-xs text-white truncate">
-                              {processed.originalImageName}
+                              {image.name}
                             </p>
-                            <Badge variant="secondary" className="text-xs mt-1">
-                              {processed.editType}
-                            </Badge>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
+
+                  {processedImages.length > 0 && (
+                    <div className="space-y-2">
+                      <h3 className="text-sm font-medium text-foreground">
+                        Processed Images ({processedImages.length})
+                      </h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        {processedImages?.map((processed) => (
+                          <div
+                            key={processed.id}
+                            className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                              selectedImage?.id === `processed-${processed.id}`
+                                ? "border-primary ring-2 ring-primary/20"
+                                : "border-accent hover:border-primary/50"
+                            }`}
+                            onClick={() =>
+                              handleProcessedImageSelect(processed)
+                            }
+                          >
+                            <div className="aspect-square bg-muted flex items-center justify-center">
+                              <img
+                                src={
+                                  processed.processedImageUrl ||
+                                  "/placeholder.svg"
+                                }
+                                alt={`Processed: ${processed.originalImageName}`}
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                            <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/60 to-transparent p-2">
+                              <p className="text-xs text-white truncate">
+                                {processed.originalImageName}
+                              </p>
+                              <Badge
+                                variant="secondary"
+                                className="text-xs mt-1"
+                              >
+                                {processed.editType}
+                              </Badge>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 flex flex-col">
+            {selectedImage ? (
+              <>
+                <div className="flex-1 bg-muted/30 flex items-center justify-center p-8">
+                  <div className="max-w-4xl max-h-full flex items-center justify-center">
+                    {showTextOverlay && textLayers.length > 0 ? (
+                      <TextOverlay
+                        imageUrl={selectedImage.url}
+                        textLayers={textLayers}
+                        selectedTextLayerId={selectedTextLayerId}
+                        onTextLayerUpdate={(layer) => {
+                          setTextLayers((prev) =>
+                            prev.map((t) => (t.id === layer.id ? layer : t))
+                          );
+                        }}
+                        onTextLayerDelete={(id) => {
+                          setTextLayers((prev) =>
+                            prev.filter((t) => t.id !== id)
+                          );
+                          if (selectedTextLayerId === id)
+                            setSelectedTextLayerId(null);
+                        }}
+                        onTextLayerSelect={setSelectedTextLayerId}
+                        imageWidth={selectedImage.dimensions?.width || 800}
+                        imageHeight={selectedImage.dimensions?.height || 600}
+                      />
+                    ) : (
+                      <SelectionCanvas
+                        imageUrl={selectedImage.url}
+                        selectionMode={selectionMode}
+                        isSelecting={isSelecting}
+                        onSelectionComplete={handleSelectionComplete}
+                        onSelectionCancel={handleSelectionCancel}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div className="h-80 border-t border-border bg-card/50">
+                  {editMode === "manual" ? (
+                    <EditingToolsPanel
+                      selectedImage={selectedImage}
+                      onApplyEdit={handleApplyEdit}
+                      onStartSelection={handleStartSelection}
+                      onApplyToSelection={handleApplyToSelection}
+                      currentSelection={currentSelection}
+                      onManualTransform={handleManualTransform}
+                      selectedTextLayer={
+                        selectedTextLayerId
+                          ? textLayers.find((t) => t.id === selectedTextLayerId)
+                          : null
+                      }
+                      onResetBasic={handleResetBasicAdjustments}
+                      onResetColor={handleResetColorControls}
+                      onResetTransform={handleReset3DTransform}
+                      onCropClick={() => setShowCropCanvas(true)}
+                      onResizeClick={() => {
+                        if (selectedImage) {
+                          setResizeWidth(
+                            Math.round(selectedImage.dimensions?.width || 800)
+                          );
+                          setResizeHeight(
+                            Math.round(selectedImage.dimensions?.height || 600)
+                          );
+                        }
+                        setShowResizeModal(true);
+                      }}
+                    />
+                  ) : (
+                    <CommandInterface
+                      selectedImage={selectedImage}
+                      onCommandSubmit={handleCommandSubmit}
+                    />
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Sparkles className="w-8 h-8 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-foreground mb-2">
+                    {isGenerationMode
+                      ? "Generate New Images"
+                      : "Select an Image to Edit"}
+                  </h3>
+                  <p className="text-muted-foreground">
+                    {isGenerationMode
+                      ? "Use the AI generator in the sidebar to create new images from text descriptions"
+                      : "Upload an image from the sidebar to start editing with natural language commands"}
+                  </p>
+                </div>
               </div>
             )}
           </div>
         </div>
 
-        <div className="flex-1 flex flex-col">
-          {selectedImage ? (
-            <>
-              <div className="flex-1 bg-muted/30 flex items-center justify-center p-8">
-                <div className="max-w-4xl max-h-full flex items-center justify-center">
-                  <SelectionCanvas
-                    imageUrl={selectedImage.url}
-                    selectionMode={selectionMode}
-                    isSelecting={isSelecting}
-                    onSelectionComplete={handleSelectionComplete}
-                    onSelectionCancel={handleSelectionCancel}
-                  />
-                </div>
-              </div>
-
-              <div className="h-80 border-t border-border bg-card/50">
-                <CommandInterface
-                  selectedImage={selectedImage}
-                  onCommandSubmit={handleCommandSubmit}
-                />
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Sparkles className="w-8 h-8 text-muted-foreground" />
-                </div>
-                <h3 className="text-lg font-semibold text-foreground mb-2">
-                  {isGenerationMode
-                    ? "Generate New Images"
-                    : "Select an Image to Edit"}
-                </h3>
-                <p className="text-muted-foreground">
-                  {isGenerationMode
-                    ? "Use the AI generator in the sidebar to create new images from text descriptions"
-                    : "Upload an image from the sidebar to start editing with natural language commands"}
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <EditingToolsPanel
-          selectedImage={selectedImage}
-          onApplyEdit={handleApplyEdit}
-          onStartSelection={handleStartSelection}
-          onApplyToSelection={handleApplyToSelection}
-          currentSelection={currentSelection}
-          onManualTransform={handleManualTransform}
-        />
+        {isProcessingModalOpen && processingRequest && (
+          <ProcessingModal
+            isOpen={isProcessingModalOpen}
+            onClose={handleProcessingModalClose}
+            processingRequest={processingRequest}
+            onComplete={handleProcessingComplete}
+          />
+        )}
       </div>
-
-      {isProcessingModalOpen && processingRequest && (
-        <ProcessingModal
-          isOpen={isProcessingModalOpen}
-          onClose={handleProcessingModalClose}
-          processingRequest={processingRequest}
-          onComplete={handleProcessingComplete}
-        />
-      )}
-    </div>
+    </>
   );
 }

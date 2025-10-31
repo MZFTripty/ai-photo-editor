@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai"
 
 // Initialize Gemini AI with the provided API key
 const genAI = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || "AIzaSyC4jboRZDHJ6a_TasizT-ilz3c2-1QpGcw",
+  apiKey: process.env.GEMINI_API_KEY,
 })
 
 interface ProcessImageRequest {
