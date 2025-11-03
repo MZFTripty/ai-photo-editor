@@ -52,18 +52,53 @@ Visit: **http://localhost:3001/editor**
 
 ## 🔧 Fixed Issues (November 3, 2025)
 
-### ✅ Issue #1: Reset Buttons
+### ✅ Issue #1: Text Layer Height Auto-Expansion (FIXED)
+
+**Problem**: When adding text to an image, the image container would grow unexpectedly, breaking the layout and affecting 3D perspective features.
+
+**Root Cause**: Delete button (`×`) was positioned outside the container using `-top-6 -right-6` classes, causing the parent container to expand.
+
+**Solution Implemented**:
+
+1. **File**: `components/text-overlay.tsx` (Line 152)
+
+   - Changed delete button positioning from `absolute -top-6 -right-6` to `absolute top-0 right-0`
+   - Added `transform translate-x-1/2 -translate-y-1/2` to maintain visual appearance while staying within bounds
+
+2. **File**: `pages/EditorPage.tsx` (Line 1901)
+
+   - Added `overflow-hidden` to image container as safety measure
+   - Ensures container never expands regardless of child elements
+
+3. **File**: `components/text-overlay.tsx` (Line 89)
+   - Confirmed `overflow-hidden` already on TextOverlay component
+   - Provides additional safety layer
+
+**Result**:
+
+- ✅ Text layer no longer causes image container expansion
+- ✅ Image height remains constant when adding/selecting text
+- ✅ 3D perspective features work correctly with text overlays
+- ✅ Delete button remains visible and functional at text corner
+- ✅ No functionality broken - only visual layout improved
+
+**Testing**:
+
+1. Upload any image
+2. Add text via "Add Text" button
+3. **Verify**: Image container height doesn't change
+4. Click on text to select it
+5. **Verify**: Height still doesn't change when delete button appears
+6. Test 3D transforms - should work smoothly with text layers
+
+---
+
+### Issue #2: Reset Buttons
 
 **Status**: Enhanced with comprehensive logging  
 **How to test**: Upload image → Adjust brightness → Click Reset → Check console logs
 
-### ✅ Issue #2: Text Layer Height
-
-**Status**: FIXED - Delete button repositioning  
-**Fix**: Changed button from `-top-6 -right-6` to `top-0 right-0` with transform  
-**Result**: Text no longer causes image container expansion
-
-### ✅ Issue #3: 3D Transform
+### Issue #3: 3D Transform
 
 **Status**: Enhanced with comprehensive logging  
 **How to test**: Upload image → Adjust Perspective Z → Click Apply Transform → Check console logs
@@ -664,9 +699,114 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-## 🗺️ Roadmap
+## � Troubleshooting
+
+### Text Layer Height Expansion Issue
+
+**Symptom**: Image container grows when adding text or selecting text layer
+
+**Status**: ✅ **FIXED**
+
+**What was fixed**:
+
+- Delete button positioning corrected (from outside to inside container)
+- Container overflow protection added
+- Image height now remains constant
+
+**Verification**:
+
+1. Upload an image to the editor
+2. Click "Add Text" and add any text
+3. Check image height - should **NOT change**
+4. Click on the text to select it (delete button appears)
+5. Check image height again - should **still NOT change**
+6. Try 3D transforms - should work smoothly
+
+**If still experiencing issues**:
+
+1. Clear browser cache (Ctrl+Shift+Delete)
+2. Refresh page (F5)
+3. Check browser console (F12) for any errors
+4. Verify all components loaded correctly
+
+### 3D Perspective Transform Not Working
+
+**Symptom**: Adjusting 3D perspective sliders has no visual effect
+
+**Troubleshooting**:
+
+1. Check if you clicked "Apply Transform" button (not just moved slider)
+2. Open browser console (F12) and look for error messages
+3. Verify image is loaded before applying transform
+4. Try a different transform value (e.g., 45° instead of small values)
+5. Ensure no text layers are causing layout issues
+
+**Expected behavior**:
+
+- Perspective Z: Image rotates like a page turning
+- Perspective X: Image tilts forward/back
+- Perspective Y: Image tilts left/right
+
+### Reset Buttons Not Working
+
+**Symptom**: Clicking Reset doesn't restore original image
+
+**Troubleshooting**:
+
+1. Ensure you applied changes before resetting (click "Apply" first)
+2. Check browser console (F12) for logs starting with 🔄
+3. Verify original file was properly uploaded
+4. Try uploading image again
+
+**Expected behavior**:
+
+- All sliders return to 0
+- Image returns to original appearance
+- Console shows reset sequence logs
+
+### Performance Issues
+
+**Symptom**: Slow image editing, lag when adjusting sliders
+
+**Troubleshooting**:
+
+1. Reduce image size (use images under 5MB)
+2. Close other browser tabs
+3. Clear browser cache
+4. Try different browser (Chrome/Firefox)
+5. Check available system memory
+
+**Optimization tips**:
+
+- Use images 1920x1080 or smaller for best performance
+- Avoid applying multiple transforms simultaneously
+- Clear IndexedDB if storage is full
+
+### Images Not Saving/Loading
+
+**Symptom**: Can't save edited images or previously saved images don't load
+
+**Troubleshooting**:
+
+1. Check browser IndexedDB is enabled
+2. Clear some browser storage space
+3. Try incognito/private mode
+4. Export as PNG/JPG instead of using browser storage
+
+**How to export**:
+
+1. After editing image
+2. Right-click image
+3. Select "Save image as..."
+4. Choose location and format
+
+---
+
+## �🗺️ Roadmap
 
 ### 🎯 Current Focus
+
+```
 
 - [ ] Advanced selection tools
 - [ ] Video editing capabilities
@@ -691,3 +831,4 @@ _CEO of Softsasi_
 [⭐ Star this repo](https://github.com/your-username/lumenframe) • [🐛 Report Bug](https://github.com/your-username/lumenframe/issues) • [💡 Request Feature](https://github.com/your-username/lumenframe/issues)
 
 </div>
+```

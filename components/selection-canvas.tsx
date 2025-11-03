@@ -18,6 +18,8 @@ interface SelectionCanvasProps {
       vertical?: boolean;
     };
   };
+  imageWidth?: number;
+  imageHeight?: number;
 }
 
 interface SelectionData {
@@ -47,6 +49,8 @@ export default function SelectionCanvas({
   onSelectionComplete,
   onSelectionCancel,
   transforms,
+  imageWidth = 800,
+  imageHeight = 600,
 }: SelectionCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -399,12 +403,18 @@ export default function SelectionCanvas({
   }, [isSelecting]);
 
   return (
-    <div className="relative inline-block">
+    <div
+      className="relative w-full bg-black rounded-lg overflow-hidden"
+      style={{
+        aspectRatio: imageWidth / imageHeight,
+        cursor: isSelecting ? "crosshair" : "default",
+      }}
+    >
       <img
         ref={imageRef}
         src={imageUrl || "/placeholder.svg"}
         alt="Image for selection"
-        className="max-w-full max-h-full object-contain"
+        className="w-full h-full object-cover"
         draggable={false}
         style={{
           transform:

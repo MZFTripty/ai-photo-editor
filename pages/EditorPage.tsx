@@ -211,43 +211,67 @@ export default function EditorPage() {
       return;
     }
 
-    const newImages: UploadedImage[] = files.map((file) => {
-      const url = URL.createObjectURL(file);
-      return {
-        id: Math.random().toString(36).substr(2, 9),
-        file,
-        url,
-        originalUrl: url, // Store original URL for reset
-        originalFile: file, // Store original File for blob URL recreation
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        // Initialize transforms with default values
-        transforms: {
-          css3d: {
-            transform: "none",
-            warp: 0,
-            skewX: 0,
-            skewY: 0,
-            skewZ: 0,
-            perspectiveX: 0,
-            perspectiveY: 0,
-            perspectiveZ: 0,
-          },
-          rotate: 0,
-          flip: {
-            horizontal: false,
-            vertical: false,
-          },
-        },
-      };
-    });
+    const processFiles = async () => {
+      const newImages: UploadedImage[] = [];
 
-    setUploadedImages((prev) => [...prev, ...newImages]);
+      for (const file of files) {
+        const url = URL.createObjectURL(file);
 
-    if (!selectedImage && newImages.length > 0) {
-      setSelectedImage(newImages[0]);
-    }
+        // Get image dimensions
+        const dimensions = await new Promise<{
+          width: number;
+          height: number;
+        }>((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            resolve({ width: img.naturalWidth, height: img.naturalHeight });
+          };
+          img.onerror = () => {
+            // Fallback to default dimensions
+            resolve({ width: 800, height: 600 });
+          };
+          img.src = url;
+        });
+
+        newImages.push({
+          id: Math.random().toString(36).substr(2, 9),
+          file,
+          url,
+          originalUrl: url, // Store original URL for reset
+          originalFile: file, // Store original File for blob URL recreation
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          dimensions, // Store actual image dimensions
+          // Initialize transforms with default values
+          transforms: {
+            css3d: {
+              transform: "none",
+              warp: 0,
+              skewX: 0,
+              skewY: 0,
+              skewZ: 0,
+              perspectiveX: 0,
+              perspectiveY: 0,
+              perspectiveZ: 0,
+            },
+            rotate: 0,
+            flip: {
+              horizontal: false,
+              vertical: false,
+            },
+          },
+        });
+      }
+
+      setUploadedImages((prev) => [...prev, ...newImages]);
+
+      if (!selectedImage && newImages.length > 0) {
+        setSelectedImage(newImages[0]);
+      }
+    };
+
+    processFiles();
   };
 
   const handleImageSelect = (image: UploadedImage) => {
@@ -1928,6 +1952,8 @@ export default function EditorPage() {
                         onSelectionComplete={handleSelectionComplete}
                         onSelectionCancel={handleSelectionCancel}
                         transforms={(selectedImage as any).transforms}
+                        imageWidth={selectedImage.dimensions?.width || 800}
+                        imageHeight={selectedImage.dimensions?.height || 600}
                       />
                     )}
 

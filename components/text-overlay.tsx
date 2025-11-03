@@ -112,47 +112,52 @@ export default function TextOverlay({
         return (
           <div
             key={layer.id}
-            className={`absolute cursor-grab active:cursor-grabbing transition-all ${
-              isSelected ? "ring-2 ring-blue-500 ring-offset-1" : ""
-            }`}
+            className="absolute"
             style={{
               left: `${layer.x}px`,
               top: `${layer.y}px`,
               transform: "translate(-50%, -50%)",
             }}
-            onMouseDown={(e) => handleMouseDown(e, layer.id)}
-            onClick={(e) => {
-              e.stopPropagation();
-              onTextLayerSelect(layer.id);
-            }}
           >
+            {/* Text content wrapper with fixed positioning context */}
             <div
-              style={{
-                fontSize: `${layer.fontSize}px`,
-                color: layer.color,
-                fontFamily: layer.fontFamily,
-                fontWeight: layer.bold ? "bold" : "normal",
-                textShadow: "0 2px 4px rgba(0,0,0,0.5)",
-                whiteSpace: "nowrap",
-                userSelect: "none",
+              className={`relative inline-block cursor-grab active:cursor-grabbing transition-all ${
+                isSelected ? "ring-2 ring-blue-500 ring-offset-1" : ""
+              }`}
+              onMouseDown={(e) => handleMouseDown(e, layer.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onTextLayerSelect(layer.id);
               }}
             >
-              {layer.text}
-            </div>
-
-            {/* Delete button on hover */}
-            {isSelected && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTextLayerDelete(layer.id);
+              <div
+                style={{
+                  fontSize: `${layer.fontSize}px`,
+                  color: layer.color,
+                  fontFamily: layer.fontFamily,
+                  fontWeight: layer.bold ? "bold" : "normal",
+                  textShadow: "0 2px 4px rgba(0,0,0,0.5)",
+                  whiteSpace: "nowrap",
+                  userSelect: "none",
                 }}
-                className="absolute top-0 right-0 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 transition-colors transform translate-x-1/2 -translate-y-1/2"
-                title="Delete text"
               >
-                <X className="w-3 h-3" />
-              </button>
-            )}
+                {layer.text}
+              </div>
+
+              {/* Delete button - now positioned relative to text content container */}
+              {isSelected && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTextLayerDelete(layer.id);
+                  }}
+                  className="absolute -top-3 -right-3 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center transition-colors shadow-lg"
+                  title="Delete text"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
         );
       })}
