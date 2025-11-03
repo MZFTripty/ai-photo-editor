@@ -147,7 +147,7 @@ export default function TextOverlay({
                   e.stopPropagation();
                   onTextLayerDelete(layer.id);
                 }}
-                className="absolute -top-6 -right-6 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 transition-colors"
+                className="absolute top-0 right-0 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 transition-colors transform translate-x-1/2 -translate-y-1/2"
                 title="Delete text"
               >
                 <X className="w-3 h-3" />

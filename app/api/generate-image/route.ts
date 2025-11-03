@@ -1,30 +1,60 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { GoogleGenAI } from "@google/genai"
+import { type NextRequest, NextResponse } from "next/server";
+import axios from "axios";
+import FormData from "form-data";
 
-const genAI = new GoogleGenAI({
-  apiKey: "AIzaSyC4jboRZDHJ6a_TasizT-ilz3c2-1QpGcw",
-})
+// Get API key from environment variable
+const STABILITY_API_KEY = process.env.STABILITY_API_KEY;
+
+// Validate that API key is configured
+if (!STABILITY_API_KEY) {
+  console.error(
+    "❌ STABILITY_API_KEY is not configured in environment variables"
+  );
+}
 
 interface GenerateImageRequest {
-  prompt: string
-  style?: string
-  aspectRatio?: string
+  prompt: string;
+  style?: string;
+  aspectRatio?: string;
 }
 
 interface GenerateImageResponse {
-  success: boolean
-  imageData?: string // base64 encoded image
-  prompt: string
-  style?: string
-  aspectRatio?: string
-  generatedAt: string
-  error?: string
+  success: boolean;
+  imageData?: string; // base64 encoded image
+  prompt: string;
+  style?: string;
+  aspectRatio?: string;
+  generatedAt: string;
+  error?: string;
+}
+
+// Map aspect ratio to Stability AI format
+// Stability AI supports: 1:1, 16:9, 9:16, 4:3, 3:4, 21:9, 9:21
+function mapAspectRatio(aspectRatio: string): string {
+  const ratioMap: Record<string, string> = {
+    // Direct support
+    "1:1": "1:1",
+    "16:9": "16:9",
+    "9:16": "9:16",
+    "4:3": "4:3",
+    "3:4": "3:4",
+    "21:9": "21:9",
+    "9:21": "9:21",
+
+    // Map unsupported ratios to closest supported equivalent
+    "3:2": "16:9", // Photo -> Landscape (close enough)
+    "2:3": "9:16", // Panoramic -> Portrait
+    "5:4": "4:3", // Classic -> Standard
+    custom: "1:1", // Custom -> Square (default)
+    original: "1:1", // Original -> Square (default)
+  };
+  return ratioMap[aspectRatio] || "1:1";
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body: GenerateImageRequest = await request.json()
-    const { prompt, style = "default", aspectRatio = "1:1" } = body
+    const body: GenerateImageRequest = await request.json();
+    const { prompt, style = "default", aspectRatio = "1:1" } = body;
 
     if (!prompt || prompt.trim().length === 0) {
       return NextResponse.json({
@@ -32,124 +62,104 @@ export async function POST(request: NextRequest) {
         error: "Prompt is required for image generation",
         prompt,
         generatedAt: new Date().toISOString(),
-      } as GenerateImageResponse)
+      } as GenerateImageResponse);
     }
 
-    console.log("[v0] Starting image generation with prompt:", prompt)
+    console.log("[v0] Starting image generation with prompt:", prompt);
 
     try {
-      const config = {
-        responseModalities: ["IMAGE", "TEXT"],
-      }
-      const model = "gemini-2.5-flash-image-preview"
-
-      // Create a detailed prompt based on the user input and style preferences
-      let fullPrompt = prompt
+      // Build full prompt with style
+      let fullPrompt = prompt;
 
       if (style && style !== "default") {
-        fullPrompt += `. Style: ${style}`
+        fullPrompt += `. Style: ${style}`;
       }
 
-      if (aspectRatio && aspectRatio !== "1:1") {
-        fullPrompt += `. Aspect ratio: ${aspectRatio}`
-      }
+      fullPrompt += ". High quality, detailed, professional image.";
 
-      fullPrompt += ". High quality, detailed, professional image."
+      console.log("[v0] Generating image with full prompt:", fullPrompt);
+      console.log("[v0] Aspect ratio:", aspectRatio);
 
-      console.log("[v0] Generating image with full prompt:", fullPrompt)
+      // Map aspect ratio for Stability AI
+      const stableRatio = mapAspectRatio(aspectRatio);
 
-      const contents = [
+      // Create FormData for Stability AI
+      const formData = new FormData();
+      formData.append("prompt", fullPrompt);
+      formData.append("output_format", "webp");
+      formData.append("aspect_ratio", stableRatio);
+
+      console.log("[v0] Making API call to Stability AI");
+
+      const response = await axios.post(
+        "https://api.stability.ai/v2beta/stable-image/generate/ultra",
+        formData,
         {
-          role: "user" as const,
-          parts: [
-            {
-              text: fullPrompt,
-            },
-          ],
-        },
-      ]
-
-      console.log("[v0] Making API call to Gemini with config:", { model, config  })
-
-      const response = await genAI.models.generateContentStream({
-        model,
-        config,
-        contents,
-      })
-
-      console.log("[v0] Received response from Gemini, processing chunks...")
-
-      for await (const chunk of response) {
-        console.log("[v0] Processing chunk:", {
-          hasCandidates: !!chunk.candidates,
-          candidatesLength: chunk.candidates?.length,
-          hasContent: !!chunk.candidates?.[0]?.content,
-          hasParts: !!chunk.candidates?.[0]?.content?.parts,
-          partsLength: chunk.candidates?.[0]?.content?.parts?.length,
-        })
-
-        if (!chunk.candidates || !chunk.candidates[0].content || !chunk.candidates[0].content.parts) {
-          console.log("[v0] Skipping chunk - missing required structure")
-          continue
+          validateStatus: undefined,
+          responseType: "arraybuffer",
+          headers: {
+            ...formData.getHeaders(),
+            Authorization: `Bearer ${STABILITY_API_KEY}`,
+            Accept: "image/*",
+          },
         }
+      );
 
-        const part = chunk.candidates[0].content.parts[0]
-        console.log("[v0] Part structure:", {
-          hasInlineData: !!part.inlineData,
-          hasText: !!part.text,
-          partKeys: Object.keys(part),
-        })
+      console.log(
+        "[v0] Received response from Stability AI, status:",
+        response.status
+      );
 
-        if (part.inlineData) {
-          const inlineData = part.inlineData
-          console.log("[v0] Found inline data:", {
-            mimeType: inlineData.mimeType,
-            hasData: !!inlineData.data,
-            dataLength: inlineData.data?.length,
-          })
+      if (response.status === 200) {
+        // Convert buffer to base64
+        const buffer = Buffer.from(response.data);
+        const base64Image = buffer.toString("base64");
+        const imageData = `data:image/webp;base64,${base64Image}`;
 
-          const imageData = `data:${inlineData.mimeType};base64,${inlineData.data}`
+        console.log("[v0] Successfully generated image with Stability AI");
 
-          console.log("[v0] Successfully generated image with Gemini")
+        return NextResponse.json({
+          success: true,
+          imageData,
+          prompt,
+          style,
+          aspectRatio,
+          generatedAt: new Date().toISOString(),
+        } as GenerateImageResponse);
+      } else {
+        // Handle error response
+        const errorMessage = response.data.toString();
+        console.error("[v0] Stability AI error:", {
+          status: response.status,
+          message: errorMessage,
+        });
 
-          return NextResponse.json({
-            success: true,
-            imageData,
-            prompt,
-            style,
-            aspectRatio,
-            generatedAt: new Date().toISOString(),
-          } as GenerateImageResponse)
-        } else if (part.text) {
-          console.log("[v0] Received text response:", part.text)
-        }
+        return NextResponse.json({
+          success: false,
+          error: `Stability AI API error (${response.status}): Failed to generate image`,
+          prompt,
+          generatedAt: new Date().toISOString(),
+        } as GenerateImageResponse);
       }
-
-      // If no image was generated, return an error
-      console.log("[v0] No image data returned from Gemini")
-      return NextResponse.json({
-        success: false,
-        error: "Failed to generate image. The model did not return image data.",
-        prompt,
-        generatedAt: new Date().toISOString(),
-      } as GenerateImageResponse)
-    } catch (geminiError) {
-      console.error("[v0] Gemini generation error:", geminiError)
+    } catch (apiError) {
+      console.error("[v0] Image generation API error:", apiError);
       console.error("[v0] Error details:", {
-        name: geminiError instanceof Error ? geminiError.name : "Unknown",
-        message: geminiError instanceof Error ? geminiError.message : String(geminiError),
-        stack: geminiError instanceof Error ? geminiError.stack : undefined,
-      })
+        name: apiError instanceof Error ? apiError.name : "Unknown",
+        message:
+          apiError instanceof Error ? apiError.message : String(apiError),
+      });
 
       return NextResponse.json({
         success: false,
-        error: `Gemini API error: ${geminiError instanceof Error ? geminiError.message : "Unknown error"}`,
+        error: `API error: ${
+          apiError instanceof Error ? apiError.message : "Unknown error"
+        }`,
         prompt,
         generatedAt: new Date().toISOString(),
-      } as GenerateImageResponse)
+      } as GenerateImageResponse);
     }
   } catch (error) {
-    console.error("[v0] Image generation error:", error)
+    console.error("[v0] Image generation error:", error);
 
     return NextResponse.json(
       {
@@ -158,7 +168,7 @@ export async function POST(request: NextRequest) {
         prompt: "",
         generatedAt: new Date().toISOString(),
       } as GenerateImageResponse,
-      { status: 500 },
-    )
+      { status: 500 }
+    );
   }
 }

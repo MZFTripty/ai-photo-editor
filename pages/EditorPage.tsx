@@ -27,6 +27,8 @@ import {
   addTextToImage,
 } from "@/lib/local-image-processing";
 import { cropImage, resizeImageDimensions, scaleImage } from "@/lib/crop-utils";
+import { LoadingOverlay } from "@/components/loading-overlay";
+import { StickerLayer, type Sticker } from "@/components/sticker-layer";
 
 interface UploadedImage {
   id: string;
@@ -42,6 +44,23 @@ interface UploadedImage {
   generationMetadata?: any;
   isProcessed?: boolean;
   originalProcessedImage?: ProcessedImage;
+  transforms?: {
+    css3d?: {
+      transform?: string;
+      warp?: number;
+      skewX?: number;
+      skewY?: number;
+      skewZ?: number;
+      perspectiveX?: number;
+      perspectiveY?: number;
+      perspectiveZ?: number;
+    };
+    rotate?: number;
+    flip?: {
+      horizontal?: boolean;
+      vertical?: boolean;
+    };
+  };
 }
 
 export default function EditorPage() {
@@ -56,6 +75,11 @@ export default function EditorPage() {
   const [processedImages, setProcessedImages] = useState<ProcessedImage[]>([]);
   const [isGenerationMode, setIsGenerationMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string>("");
+  const [stickers, setStickers] = useState<Sticker[]>([]);
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(
+    null
+  );
 
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionMode, setSelectionMode] = useState<
@@ -198,6 +222,24 @@ export default function EditorPage() {
         name: file.name,
         size: file.size,
         type: file.type,
+        // Initialize transforms with default values
+        transforms: {
+          css3d: {
+            transform: "none",
+            warp: 0,
+            skewX: 0,
+            skewY: 0,
+            skewZ: 0,
+            perspectiveX: 0,
+            perspectiveY: 0,
+            perspectiveZ: 0,
+          },
+          rotate: 0,
+          flip: {
+            horizontal: false,
+            vertical: false,
+          },
+        },
       };
     });
 
@@ -230,12 +272,14 @@ export default function EditorPage() {
     const parsed = parseCommand(command);
     if (parsed && parsed.confidence > 0.5) {
       // Use local processing for high-confidence commands
+      setLoadingMessage("🤖 Processing AI command...");
       await handleApplyEdit(parsed.type, parsed.params);
       return;
     }
 
     // Fallback to API-based processing if local parsing confidence is low
     setCurrentAnalysis(analysis);
+    setLoadingMessage("🤖 Analyzing command...");
 
     if (
       analysis.success &&
@@ -263,21 +307,25 @@ export default function EditorPage() {
 
       setProcessingRequest(request);
       setIsProcessingModalOpen(true);
+      setLoadingMessage("🔄 Processing image...");
     }
   };
 
   const handleProcessingComplete = (result: ProcessedImage) => {
     setProcessedImages((prev) => [result, ...prev]);
     setIsProcessingModalOpen(false);
+    setLoadingMessage("");
   };
 
   const handleProcessingModalClose = () => {
     setIsProcessingModalOpen(false);
     setProcessingRequest(null);
+    setLoadingMessage("");
   };
 
   const handleImageGenerated = async (imageData: string, metadata: any) => {
     setIsGenerating(true);
+    setLoadingMessage("🎨 Image generating...");
 
     try {
       if (!imageData || typeof imageData !== "string") {
@@ -345,6 +393,7 @@ export default function EditorPage() {
       );
     } finally {
       setIsGenerating(false);
+      setLoadingMessage("");
     }
   };
 
@@ -409,7 +458,19 @@ export default function EditorPage() {
   };
 
   const handleApplyEdit = async (editType: string, params: any) => {
-    if (!selectedImage) return;
+    console.log("🎬 handleApplyEdit called with:", { editType, params });
+
+    if (!selectedImage) {
+      console.error("❌ No selectedImage!");
+      return;
+    }
+
+    console.log(
+      "✅ selectedImage exists, proceeding with edit:",
+      selectedImage.id
+    );
+
+    setLoadingMessage("⚡ Applying edit...");
 
     try {
       let processedUrl: string | null = null;
@@ -448,6 +509,125 @@ export default function EditorPage() {
             params.direction as "horizontal" | "vertical"
           );
           break;
+
+        case "3d-transform": {
+          // Apply 3D CSS transforms using Canvas
+          console.log("🎬 Applying 3D Transform - RAW PARAMS:", {
+            warp: params.warp,
+            skewX: params.skewX,
+            skewY: params.skewY,
+            skewZ: params.skewZ,
+            perspectiveX: params.perspectiveX,
+            perspectiveY: params.perspectiveY,
+            perspectiveZ: params.perspectiveZ,
+          });
+          console.log("🔍 Params types:", {
+            warpType: typeof params.warp,
+            skewZType: typeof params.skewZ,
+            perspectiveZType: typeof params.perspectiveZ,
+          });
+
+          // Build CSS transform string
+          const transforms: string[] = [];
+
+          // Start with perspective context
+          const perspectiveValue = 1200;
+          transforms.push(`perspective(${perspectiveValue}px)`);
+
+          // 1. Add Perspective X/Y (rotations around X and Y axes)
+          if (params.perspectiveX !== 0 || params.perspectiveY !== 0) {
+            const rotX = params.perspectiveX * 0.5;
+            const rotY = params.perspectiveY * 0.5;
+            transforms.push(`rotateX(${rotX}deg)`);
+            transforms.push(`rotateY(${rotY}deg)`);
+            console.log("✅ Added Perspective X/Y:", { rotX, rotY });
+          }
+
+          // 2. Add Perspective Z (Z-axis rotation)
+          if (params.perspectiveZ !== 0) {
+            transforms.push(`rotateZ(${params.perspectiveZ}deg)`);
+            console.log("✅ Added Perspective Z:", params.perspectiveZ);
+          }
+
+          // 3. Add standard skew (X, Y)
+          if (params.skewX !== 0 || params.skewY !== 0) {
+            transforms.push(`skew(${params.skewX}deg, ${params.skewY}deg)`);
+            console.log("✅ Added Skew X/Y:", {
+              skewX: params.skewX,
+              skewY: params.skewY,
+            });
+          }
+
+          // 4. Add Skew Z (3D skew - using rotate transformation on different axis)
+          // Since skewZ() is not standard, we use a combination approach
+          if (params.skewZ !== 0) {
+            // Create 3D skew effect using transform matrices
+            // This creates a Z-axis skew by combining rotations and perspective
+            const skewAngle = params.skewZ;
+            // Apply skew by using matrix3d or combining transforms
+            transforms.push(`rotateX(${skewAngle * 0.3}deg)`);
+            transforms.push(`rotateY(${skewAngle * 0.3}deg)`);
+            console.log("✅ Added Skew Z (via matrix):", skewAngle);
+          }
+
+          // 5. Add warp (scale)
+          if (params.warp !== 0) {
+            const scaleAmount = 1 + params.warp * 0.01;
+            transforms.push(`scale(${scaleAmount})`);
+            console.log("✅ Added Warp/Scale:", scaleAmount);
+          }
+
+          // Combine all transforms
+          const transformString = transforms.join(" ");
+
+          console.log(
+            "🎨 Final CSS Transform string:",
+            transformString || "none"
+          );
+          console.log("🎨 Transform array:", transforms);
+
+          // Create temporary canvas to apply transform
+          // Note: This is a visual CSS transform, stored as metadata
+          const updatedImage: UploadedImage = {
+            ...selectedImage,
+            // Store transform metadata for rendering
+            transforms: {
+              ...((selectedImage as any).transforms || {}),
+              css3d: {
+                transform: transformString || "none",
+                warp: params.warp,
+                skewX: params.skewX,
+                skewY: params.skewY,
+                skewZ: params.skewZ,
+                perspectiveX: params.perspectiveX,
+                perspectiveY: params.perspectiveY,
+                perspectiveZ: params.perspectiveZ,
+              },
+            },
+          };
+
+          // Update in the images list
+          // Update in the images list
+          setUploadedImages((prev) =>
+            prev.map((img) =>
+              img.id === selectedImage.id ? updatedImage : img
+            )
+          );
+
+          // Update selected image
+          setSelectedImage(updatedImage);
+
+          console.log("✅ 3D Transform applied successfully to image:", {
+            imageId: selectedImage.id,
+            transforms: updatedImage.transforms?.css3d,
+            transformMetadataExists: !!updatedImage.transforms?.css3d,
+            updatedImageData: updatedImage,
+          });
+          console.log("🎨 Transform string being applied:", transformString);
+          console.log("📊 Updated image object saved to state");
+          setLoadingMessage("");
+          return;
+        }
 
         case "add-text": {
           // Check if updating existing text or creating new one
@@ -503,78 +683,294 @@ export default function EditorPage() {
         console.log("Image processing completed successfully");
       }
     } catch (error) {
-      console.error("Edit application failed:", error);
-      alert(
-        `Failed to apply edit: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
-      );
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error("❌ Edit application failed:", {
+        editType,
+        error: errorMessage,
+        stack: error instanceof Error ? error.stack : "No stack trace",
+        selectedImageExists: !!selectedImage,
+        selectedImageId: selectedImage?.id,
+      });
+
+      // Log the full error object for debugging
+      console.error("Full error object:", error);
+
+      alert(`Failed to apply edit (${editType}): ${errorMessage}`);
+    } finally {
+      setLoadingMessage("");
     }
   };
 
   const handleResetBasicAdjustments = () => {
-    console.log("Reset Basic - selectedImage:", selectedImage);
+    console.log(
+      "🎬 PARENT: handleResetBasicAdjustments called - selectedImage:",
+      selectedImage?.id
+    );
     if (!selectedImage) {
-      console.warn("No selectedImage!");
+      console.warn("❌ PARENT: No selectedImage!");
       return;
     }
 
-    // Create fresh blob URL from original file if available
+    // Step 1: Create fresh blob URL from original file
     let resetUrl = selectedImage.originalUrl;
     if (selectedImage.originalFile) {
+      // Revoke old URL to free memory
+      if (
+        selectedImage.url &&
+        selectedImage.url !== selectedImage.originalUrl
+      ) {
+        console.log(
+          "🗑️ PARENT: Revoking old URL:",
+          selectedImage.url.substring(0, 50)
+        );
+        URL.revokeObjectURL(selectedImage.url);
+      }
+      // Create fresh blob URL
       resetUrl = URL.createObjectURL(selectedImage.originalFile);
-      console.log("Created fresh blob URL from original file:", resetUrl);
+      console.log(
+        "📌 PARENT: Created fresh blob URL from originalFile:",
+        resetUrl.substring(0, 50)
+      );
+    } else {
+      console.log(
+        "⚠️ PARENT: No originalFile, using originalUrl:",
+        selectedImage.originalUrl?.substring(0, 50)
+      );
     }
 
     if (!resetUrl) {
-      console.warn("No original URL or file found!");
+      console.warn("❌ PARENT: No original URL or file found!");
       return;
     }
 
-    const resetImage = { ...selectedImage, url: resetUrl };
-    console.log("Reset Basic - resetting to:", resetImage);
-    setSelectedImage(resetImage);
+    // Step 2: Reset all adjustments and transforms
+    const resetImage: UploadedImage = {
+      ...selectedImage,
+      url: resetUrl,
+      originalUrl: resetUrl,
+      transforms: {
+        css3d: {
+          transform: "none",
+          warp: 0,
+          skewX: 0,
+          skewY: 0,
+          skewZ: 0,
+          perspectiveX: 0,
+          perspectiveY: 0,
+          perspectiveZ: 0,
+        },
+        rotate: 0,
+        flip: {
+          horizontal: false,
+          vertical: false,
+        },
+      },
+    };
 
-    // Update in database
-    setUploadedImages((prev) =>
-      prev.map((img) => (img.id === selectedImage.id ? resetImage : img))
-    );
+    console.log("✅ PARENT: Reset image object created:", resetImage.id);
+    console.log("📌 PARENT: New URL will be:", resetUrl.substring(0, 50));
+
+    // Step 3: Update state - This SHOULD trigger SelectionCanvas re-render
+    setSelectedImage(resetImage);
+    console.log("✅ PARENT: setSelectedImage called - state should update");
+
+    // Step 4: Update in uploaded images array
+    setUploadedImages((prev) => {
+      const updated = prev.map((img) =>
+        img.id === selectedImage.id ? resetImage : img
+      );
+      console.log("✅ PARENT: setUploadedImages called - array updated");
+      return updated;
+    });
+
+    console.log("✅ PARENT: Basic adjustments reset COMPLETE!");
   };
 
   const handleResetColorControls = () => {
-    if (!selectedImage) return;
-
-    // Create fresh blob URL from original file if available
-    let resetUrl = selectedImage.originalUrl;
-    if (selectedImage.originalFile) {
-      resetUrl = URL.createObjectURL(selectedImage.originalFile);
+    console.log(
+      "🎬 PARENT: handleResetColorControls called - selectedImage:",
+      selectedImage?.id
+    );
+    if (!selectedImage) {
+      console.warn("❌ PARENT: No selectedImage!");
+      return;
     }
 
-    if (!resetUrl) return;
+    // Step 1: Create fresh blob URL from original file
+    let resetUrl = selectedImage.originalUrl;
+    if (selectedImage.originalFile) {
+      // Revoke old URL to free memory
+      if (
+        selectedImage.url &&
+        selectedImage.url !== selectedImage.originalUrl
+      ) {
+        console.log(
+          "🗑️ PARENT: Revoking old URL:",
+          selectedImage.url.substring(0, 50)
+        );
+        URL.revokeObjectURL(selectedImage.url);
+      }
+      // Create fresh blob URL
+      resetUrl = URL.createObjectURL(selectedImage.originalFile);
+      console.log(
+        "📌 PARENT: Created fresh blob URL from originalFile:",
+        resetUrl.substring(0, 50)
+      );
+    } else {
+      console.log(
+        "⚠️ PARENT: No originalFile, using originalUrl:",
+        selectedImage.originalUrl?.substring(0, 50)
+      );
+    }
 
-    const resetImage = { ...selectedImage, url: resetUrl };
+    if (!resetUrl) {
+      console.warn("❌ PARENT: No original URL or file found!");
+      return;
+    }
+
+    // Step 2: Reset all color adjustments and transforms
+    const resetImage: UploadedImage = {
+      ...selectedImage,
+      url: resetUrl,
+      originalUrl: resetUrl,
+      transforms: {
+        css3d: {
+          transform: "none",
+          warp: 0,
+          skewX: 0,
+          skewY: 0,
+          skewZ: 0,
+          perspectiveX: 0,
+          perspectiveY: 0,
+          perspectiveZ: 0,
+        },
+        rotate: 0,
+        flip: {
+          horizontal: false,
+          vertical: false,
+        },
+      },
+    };
+
+    console.log("✅ PARENT: Reset image object created:", resetImage.id);
+    console.log("📌 PARENT: New URL will be:", resetUrl.substring(0, 50));
+
+    // Step 3: Update state
     setSelectedImage(resetImage);
-    setUploadedImages((prev) =>
-      prev.map((img) => (img.id === selectedImage.id ? resetImage : img))
-    );
+    console.log("✅ PARENT: setSelectedImage called - state should update");
+
+    // Step 4: Update in uploaded images array
+    setUploadedImages((prev) => {
+      const updated = prev.map((img) =>
+        img.id === selectedImage.id ? resetImage : img
+      );
+      console.log("✅ PARENT: setUploadedImages called - array updated");
+      return updated;
+    });
+
+    console.log("✅ PARENT: Color controls reset COMPLETE!");
   };
 
   const handleReset3DTransform = () => {
-    if (!selectedImage) return;
-
-    // Create fresh blob URL from original file if available
-    let resetUrl = selectedImage.originalUrl;
-    if (selectedImage.originalFile) {
-      resetUrl = URL.createObjectURL(selectedImage.originalFile);
+    console.log(
+      "🔄 Resetting 3D Transform - selectedImage:",
+      selectedImage?.id
+    );
+    if (!selectedImage) {
+      console.warn("❌ No selectedImage!");
+      return;
     }
 
-    if (!resetUrl) return;
+    // Step 1: Create fresh blob URL from original file
+    let resetUrl = selectedImage.originalUrl;
+    if (selectedImage.originalFile) {
+      // Revoke old URL to free memory
+      if (
+        selectedImage.url &&
+        selectedImage.url !== selectedImage.originalUrl
+      ) {
+        URL.revokeObjectURL(selectedImage.url);
+      }
+      // Create fresh blob URL
+      resetUrl = URL.createObjectURL(selectedImage.originalFile);
+      console.log("✅ Created fresh blob URL from original file");
+    }
 
-    const resetImage = { ...selectedImage, url: resetUrl };
+    if (!resetUrl) {
+      console.warn("❌ No original URL or file found!");
+      return;
+    }
+
+    // Step 2: Clear transforms metadata completely
+    const resetImage: UploadedImage = {
+      ...selectedImage,
+      url: resetUrl,
+      originalUrl: resetUrl,
+      transforms: {
+        css3d: {
+          transform: "none",
+          warp: 0,
+          skewX: 0,
+          skewY: 0,
+          skewZ: 0,
+          perspectiveX: 0,
+          perspectiveY: 0,
+          perspectiveZ: 0,
+        },
+        rotate: 0,
+        flip: {
+          horizontal: false,
+          vertical: false,
+        },
+      },
+    };
+
+    console.log("✅ Reset image object created with cleared transforms");
+
+    // Step 3: Update state
     setSelectedImage(resetImage);
+
+    // Step 4: Update in uploaded images array
     setUploadedImages((prev) =>
       prev.map((img) => (img.id === selectedImage.id ? resetImage : img))
     );
+
+    console.log("✅ 3D Transform reset complete!");
+  };
+
+  // Sticker Handlers
+  const handleAddSticker = (
+    emoji: string,
+    type: "emoji" | "shape" = "emoji"
+  ) => {
+    const newSticker: Sticker = {
+      id: `sticker-${Date.now()}`,
+      emoji,
+      x: 50,
+      y: 50,
+      size: 60,
+      rotation: 0,
+      zIndex: stickers.length + 1,
+      type,
+    };
+    setStickers([...stickers, newSticker]);
+    setSelectedStickerId(newSticker.id);
+  };
+
+  const handleUpdateSticker = (id: string, updates: Partial<Sticker>) => {
+    setStickers((prev) =>
+      prev.map((sticker) =>
+        sticker.id === id ? { ...sticker, ...updates } : sticker
+      )
+    );
+  };
+
+  const handleDeleteSticker = (id: string) => {
+    setStickers((prev) => prev.filter((sticker) => sticker.id !== id));
+    if (selectedStickerId === id) {
+      setSelectedStickerId(null);
+    }
   };
 
   const handleCropComplete = async (
@@ -666,32 +1062,465 @@ export default function EditorPage() {
     command: string,
     selectionData: any
   ) => {
+    console.log("🎯 handleApplyToSelection called with:", {
+      command,
+      commandLength: command.length,
+      commandTrimmed: command.trim(),
+      selectionDataType: selectionData?.type,
+      selectionDataBounds: selectionData?.bounds,
+      selectedImage: selectedImage?.id || selectedImage,
+    });
+
     if (!selectedImage || !selectionData) {
+      console.error("❌ Missing selectedImage or selectionData");
       alert("Please make a selection first");
       return;
     }
 
-    const fullCommand = `Apply the following edit to the selected area (${selectionData.type} selection at coordinates ${selectionData.bounds.x},${selectionData.bounds.y} with size ${selectionData.bounds.width}x${selectionData.bounds.height}): ${command}`;
+    // Validate command
+    if (!command || command.trim().length === 0) {
+      console.error("❌ Empty command provided");
+      alert("Please enter a command or select a quick option");
+      return;
+    }
+
+    setLoadingMessage(
+      `🎯 Applying edit to selected area... Applying edits to selected area...`
+    );
 
     try {
-      const response = await fetch("/api/analyze-command", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: fullCommand, hasImage: true }),
-      });
+      const imageUrl =
+        typeof selectedImage === "string"
+          ? selectedImage
+          : (selectedImage as any)?.url;
 
-      if (!response.ok) {
-        throw new Error(`Analysis failed: ${response.status}`);
+      console.log("📸 Image URL:", imageUrl);
+
+      if (!imageUrl) {
+        console.error("❌ Invalid imageUrl");
+        alert("Invalid image");
+        setLoadingMessage("");
+        return;
       }
 
-      const analysis = await response.json();
-      if (analysis.success) {
-        await handleCommandSubmit(fullCommand, analysis);
-        setCurrentSelection(null); // Clear selection after applying
+      // Create mask from selection data
+      console.log("🎨 Creating mask from selection...");
+      const maskCanvas = await createMaskFromSelection(selectionData);
+      console.log("✅ Mask created:", maskCanvas);
+
+      if (!maskCanvas) {
+        console.error("❌ Failed to create mask");
+        alert("Failed to create selection mask");
+        setLoadingMessage("");
+        return;
+      }
+
+      // Convert mask canvas to blob - use Promise to make it awaitable
+      const maskBlob = await new Promise<Blob | null>((resolve) => {
+        maskCanvas.toBlob((b) => resolve(b), "image/png");
+      });
+
+      if (!maskBlob) {
+        console.error("❌ Failed to convert mask to blob");
+        setLoadingMessage("");
+        alert("Failed to convert mask");
+        return;
+      }
+
+      // Convert image URL to base64 or blob if it's a blob URL
+      console.log("🖼️ Converting image URL to base64...");
+      let imageBase64: string;
+
+      try {
+        const imageResponse = await fetch(imageUrl);
+        const imageBlob = await imageResponse.blob();
+        imageBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            // Remove data URL prefix if present (e.g., "data:image/png;base64,")
+            const base64Only = result.includes(",")
+              ? result.split(",")[1]
+              : result;
+            resolve(base64Only);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(imageBlob);
+        });
+        console.log("✅ Image converted to base64:", {
+          base64Length: imageBase64.length,
+          isClean: !imageBase64.includes(","),
+        });
+      } catch (error) {
+        console.error("❌ Failed to convert image to base64:", error);
+        alert("Failed to process image");
+        setLoadingMessage("");
+        return;
+      }
+
+      // Send to inpaint API with the mask
+      const formData = new FormData();
+      formData.append("imageData", imageBase64); // Send clean base64 (no prefix)
+      formData.append("maskData", maskBlob, "mask.png");
+      formData.append("prompt", command);
+      formData.append("selectionBounds", JSON.stringify(selectionData.bounds));
+
+      console.log("📤 Sending to API with FormData (Blob mask)...");
+      console.log("📦 FormData contents:", {
+        hasImageData: formData.has("imageData"),
+        hasMask: formData.has("maskData"),
+        hasPrompt: formData.has("prompt"),
+        promptValue: command,
+        promptLength: command.length,
+        maskBlobSize: maskBlob.size,
+      });
+
+      if (maskBlob.size === 0) {
+        console.warn(
+          "⚠️ WARNING: Mask blob is empty! Selection may not be valid"
+        );
+      }
+
+      try {
+        const response = await fetch("/api/process-image", {
+          method: "POST",
+          body: formData,
+        });
+
+        console.log("📥 API Response status:", response.status);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("❌ API Error:", errorText);
+          throw new Error(`API failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log("✅ API Response data:", data);
+
+        if (data.success) {
+          console.log("📝 Processing image update...", {
+            selectedImageType: typeof selectedImage,
+            selectedImageId:
+              typeof selectedImage === "object" ? selectedImage?.id : "N/A",
+            appliedEdits: data.appliedEdits,
+            isLocalProcessing: data.appliedEdits?.[0]?.includes("Local"),
+          });
+
+          // Check if this was local processing (due to credit exhaustion)
+          const isLocalProcessing = data.appliedEdits
+            ?.join(" ")
+            .includes("Local");
+          if (isLocalProcessing) {
+            console.warn(
+              "⚠️  Using LOCAL processing - AI credits exhausted, applying manual filters"
+            );
+            setLoadingMessage("Using local filters (credits exhausted)");
+          }
+
+          // Update the selected image with processed result
+          setUploadedImages((prev) => {
+            const updated = prev.map((img) => {
+              const shouldUpdate =
+                typeof selectedImage === "object"
+                  ? img.id === selectedImage.id
+                  : false;
+
+              if (shouldUpdate) {
+                console.log("🔄 Updating image in array:", img.id);
+                return {
+                  ...img,
+                  url: data.processedImageUrl,
+                  isProcessed: true,
+                  originalUrl:
+                    img.originalUrl ||
+                    (typeof selectedImage === "string"
+                      ? selectedImage
+                      : (selectedImage as any)?.url),
+                };
+              }
+              return img;
+            });
+            console.log("📊 Updated images array:", updated.length, "items");
+            return updated;
+          });
+
+          // Also update selectedImage directly so UI updates immediately
+          if (typeof selectedImage === "object") {
+            const updatedSelectedImage: UploadedImage = {
+              ...selectedImage,
+              url: data.processedImageUrl,
+              isProcessed: true,
+              originalUrl: selectedImage.originalUrl || selectedImage.url,
+            };
+            setSelectedImage(updatedSelectedImage);
+            console.log(
+              "✅ Selected image updated with new URL:",
+              data.processedImageUrl
+            );
+          }
+
+          setCurrentSelection(null);
+          console.log("✅ Selection edit applied successfully", {
+            method: isLocalProcessing ? "Local processing" : "AI",
+          });
+        } else {
+          console.error("❌ API returned success: false", data);
+          throw new Error(data.error || "API processing failed");
+        }
+      } catch (error) {
+        console.error("❌ Selection edit failed:", error);
+        alert("Failed to apply edit to selection: " + (error as Error).message);
+      } finally {
+        setLoadingMessage("");
       }
     } catch (error) {
       console.error("Selection edit failed:", error);
+      alert("Failed to apply edit to selection: " + (error as Error).message);
+    } finally {
+      setLoadingMessage("");
     }
+  };
+
+  // Reset handlers for step-by-step image reset
+  const handleResetFullImage = () => {
+    console.log("🔄 handleResetFullImage called", { selectedImage });
+
+    if (!selectedImage) {
+      console.error("❌ No selected image");
+      alert("No image selected / No image selected");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Reset entire image?\n\nAll edit history will be deleted and the original image will be restored.\n\nThis action cannot be undone.\n\nReset entire image?\n\nAll edits will be lost and original image will be restored."
+    );
+
+    if (confirmed) {
+      console.log("✅ Resetting image...");
+      const originalUrl =
+        (selectedImage as any).originalUrl || (selectedImage as any).url;
+
+      console.log("📸 Original URL:", originalUrl);
+
+      setUploadedImages((prev) => {
+        const updated = prev.map((img) =>
+          img.id === selectedImage.id
+            ? { ...img, url: originalUrl, isProcessed: false }
+            : img
+        );
+        console.log("📝 Updated images:", updated);
+        return updated;
+      });
+
+      setTextLayers([]);
+      setStickers([]);
+      setCurrentSelection(null);
+      setSelectedTextLayerId(null);
+      setSelectedStickerId(null);
+      alert("✅ Image reset successfully! / ছবি সফলভাবে রিসেট করা হয়েছে!");
+    }
+  };
+
+  const handleResetStickers = () => {
+    if (stickers.length === 0) {
+      alert("কোন স্টিকার নেই / No stickers to remove");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${stickers.length} টি স্টিকার মুছুন?\n\nসব স্টিকার সরিয়ে দেওয়া হবে কিন্তু অন্যান্য সম্পাদনা বজায় থাকবে।\n\nRemove ${stickers.length} stickers?\n\nAll stickers will be removed but other edits will remain.`
+    );
+
+    if (confirmed) {
+      setStickers([]);
+      setSelectedStickerId(null);
+      alert("✅ Stickers removed! / স্টিকার মুছে দেওয়া হয়েছে!");
+    }
+  };
+
+  const handleResetTextLayers = () => {
+    if (textLayers.length === 0) {
+      alert("কোন টেক্সট নেই / No text layers to remove");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${textLayers.length} টি টেক্সট লেয়ার মুছুন?\n\nসব টেক্সট সরিয়ে দেওয়া হবে কিন্তু অন্যান্য সম্পাদনা বজায় থাকবে।\n\nRemove ${textLayers.length} text layers?\n\nAll text will be removed but other edits will remain.`
+    );
+
+    if (confirmed) {
+      setTextLayers([]);
+      setSelectedTextLayerId(null);
+      alert("✅ Text layers removed! / টেক্সট লেয়ার মুছে দেওয়া হয়েছে!");
+    }
+  };
+
+  const handleClearSelection = () => {
+    if (!currentSelection) {
+      alert("কোন সিলেকশন নেই / No active selection");
+      return;
+    }
+
+    setCurrentSelection(null);
+    alert("✅ Selection cleared! / সিলেকশন ক্লিয়ার হয়েছে!");
+  };
+
+  // Helper function to create mask from selection data
+  const createMaskFromSelection = async (
+    selectionData: any
+  ): Promise<HTMLCanvasElement | null> => {
+    const imageUrl =
+      typeof selectedImage === "string"
+        ? selectedImage
+        : (selectedImage as any)?.url;
+
+    console.log("🎨 Creating mask - selectionData:", selectionData);
+
+    if (!imageUrl) {
+      console.error("❌ No imageUrl for mask creation");
+      return null;
+    }
+
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+
+    return new Promise((resolve) => {
+      img.onload = () => {
+        const actualImageWidth = img.naturalWidth || img.width;
+        const actualImageHeight = img.naturalHeight || img.height;
+
+        console.log("✅ Image loaded for mask:", {
+          displayWidth: img.width,
+          displayHeight: img.height,
+          naturalWidth: actualImageWidth,
+          naturalHeight: actualImageHeight,
+        });
+
+        // Canvas must match the ACTUAL image dimensions, not display size
+        const canvas = document.createElement("canvas");
+        canvas.width = actualImageWidth;
+        canvas.height = actualImageHeight;
+        const ctx = canvas.getContext("2d");
+
+        if (!ctx) {
+          console.error("❌ Failed to get 2D context");
+          resolve(null);
+          return;
+        }
+
+        // Create black background (do not edit - areas we want to preserve)
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw white mask for selected area (areas we want to edit)
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+
+        // CRITICAL: Selection data is in canvas display coordinates
+        // We need to find the canvas element to get its actual size vs displayed size
+        const selectionCanvas = document.querySelector(
+          "canvas[style*='border']"
+        ) as HTMLCanvasElement;
+        let scaleX = 1;
+        let scaleY = 1;
+
+        if (selectionCanvas) {
+          // Scale from selection canvas size to actual image size
+          scaleX = actualImageWidth / selectionCanvas.width;
+          scaleY = actualImageHeight / selectionCanvas.height;
+          console.log("📐 Scale factors (canvas → actual image):", {
+            selectionCanvasW: selectionCanvas.width,
+            selectionCanvasH: selectionCanvas.height,
+            actualImageW: actualImageWidth,
+            actualImageH: actualImageHeight,
+            scaleX,
+            scaleY,
+          });
+        } else {
+          console.warn("⚠️ Could not find selection canvas, using 1:1 scaling");
+        }
+
+        if (
+          selectionData.type === "pen" &&
+          selectionData.coordinates &&
+          selectionData.coordinates.length > 0
+        ) {
+          console.log(
+            "✏️ Drawing pen path with",
+            selectionData.coordinates.length,
+            "points"
+          );
+          // Draw pen path with smooth curves
+          ctx.beginPath();
+          const firstX = selectionData.coordinates[0][0] * scaleX;
+          const firstY = selectionData.coordinates[0][1] * scaleY;
+          ctx.moveTo(firstX, firstY);
+
+          // Draw with quadratic curves for smooth lines
+          for (let i = 1; i < selectionData.coordinates.length; i++) {
+            const currX = selectionData.coordinates[i][0] * scaleX;
+            const currY = selectionData.coordinates[i][1] * scaleY;
+            const prevX = selectionData.coordinates[i - 1][0] * scaleX;
+            const prevY = selectionData.coordinates[i - 1][1] * scaleY;
+
+            const midX = (prevX + currX) / 2;
+            const midY = (prevY + currY) / 2;
+            ctx.quadraticCurveTo(prevX, prevY, midX, midY);
+          }
+          // Final line to last point
+          const lastX =
+            selectionData.coordinates[selectionData.coordinates.length - 1][0] *
+            scaleX;
+          const lastY =
+            selectionData.coordinates[selectionData.coordinates.length - 1][1] *
+            scaleY;
+          ctx.lineTo(lastX, lastY);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        } else if (selectionData.type === "rectangle" && selectionData.bounds) {
+          console.log("⬜ Drawing rectangle mask:", selectionData.bounds);
+          // Draw rectangle mask
+          const x = selectionData.bounds.x * scaleX;
+          const y = selectionData.bounds.y * scaleY;
+          const w = selectionData.bounds.width * scaleX;
+          const h = selectionData.bounds.height * scaleY;
+          console.log("⬜ Rectangle coords (scaled):", { x, y, w, h });
+          ctx.fillRect(x, y, w, h);
+          ctx.strokeRect(x, y, w, h);
+        } else if (selectionData.type === "circle" && selectionData.bounds) {
+          console.log("⭕ Drawing circle mask:", selectionData.bounds);
+          // Draw circle mask
+          const cx =
+            (selectionData.bounds.x + selectionData.bounds.width / 2) * scaleX;
+          const cy =
+            (selectionData.bounds.y + selectionData.bounds.height / 2) * scaleY;
+          const radius = (selectionData.bounds.width / 2) * scaleX;
+          console.log("⭕ Circle coords (scaled):", { cx, cy, radius });
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        console.log("✅ Mask canvas created:", {
+          width: canvas.width,
+          height: canvas.height,
+          selectionType: selectionData.type,
+        });
+        resolve(canvas);
+      };
+
+      img.onerror = () => {
+        console.error("❌ Failed to load image for mask creation");
+        resolve(null);
+      };
+      img.src = imageUrl;
+    });
   };
 
   const handleSaveProject = () => {
@@ -768,6 +1597,9 @@ export default function EditorPage() {
 
   return (
     <>
+      {/* Loading Overlay */}
+      <LoadingOverlay isVisible={!!loadingMessage} message={loadingMessage} />
+
       {/* Crop Canvas Modal */}
       {showCropCanvas && selectedImage && (
         <CropCanvas
@@ -940,15 +1772,12 @@ export default function EditorPage() {
         </header>
 
         <div className="flex h-[calc(100vh-73px)]">
-          <div className="w-80 border-r border-border bg-card/30 flex flex-col">
-            <div className="p-4 border-b border-border">
+          {/* LEFT COLUMN: Image Library */}
+          <div className="w-72 border-r border-border bg-card/30 flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-border shrink-0">
               <h2 className="font-semibold text-foreground mb-2">
                 Image Library
               </h2>
-              <p className="text-sm text-muted-foreground">
-                Upload and manage your images
-              </p>
-
               <div className="flex gap-2 mt-3">
                 <Button
                   variant={!isGenerationMode ? "default" : "outline"}
@@ -982,8 +1811,8 @@ export default function EditorPage() {
                   <ImageUpload onImageUpload={handleImageUpload} compact />
 
                   <div className="space-y-2">
-                    <h3 className="text-sm font-medium text-foreground">
-                      Uploaded Images ({uploadedImages.length})
+                    <h3 className="text-xs font-medium text-foreground uppercase">
+                      Uploaded ({uploadedImages.length})
                     </h3>
                     <div className="grid grid-cols-2 gap-2">
                       {uploadedImages?.map((image) => (
@@ -1015,17 +1844,12 @@ export default function EditorPage() {
                               e.stopPropagation();
                               handleImageRemove(image.id);
                             }}
-                            className="absolute top-1 right-1 w-6 h-6 bg-destructive/80 hover:bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="absolute top-1 right-1 w-5 h-5 bg-destructive/80 hover:bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-xs"
                             type="button"
                             aria-label="Remove image"
                           >
                             ×
                           </button>
-                          <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/60 to-transparent p-2">
-                            <p className="text-xs text-white truncate">
-                              {image.name}
-                            </p>
-                          </div>
                         </div>
                       ))}
                     </div>
@@ -1033,8 +1857,8 @@ export default function EditorPage() {
 
                   {processedImages.length > 0 && (
                     <div className="space-y-2">
-                      <h3 className="text-sm font-medium text-foreground">
-                        Processed Images ({processedImages.length})
+                      <h3 className="text-xs font-medium text-foreground uppercase">
+                        Processed ({processedImages.length})
                       </h3>
                       <div className="grid grid-cols-2 gap-2">
                         {processedImages?.map((processed) => (
@@ -1059,17 +1883,6 @@ export default function EditorPage() {
                                 className="w-full h-full object-cover"
                               />
                             </div>
-                            <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/60 to-transparent p-2">
-                              <p className="text-xs text-white truncate">
-                                {processed.originalImageName}
-                              </p>
-                              <Badge
-                                variant="secondary"
-                                className="text-xs mt-1"
-                              >
-                                {processed.editType}
-                              </Badge>
-                            </div>
                           </div>
                         ))}
                       </div>
@@ -1080,11 +1893,12 @@ export default function EditorPage() {
             </div>
           </div>
 
-          <div className="flex-1 flex flex-col">
+          {/* MIDDLE COLUMN: Image Canvas & Preview */}
+          <div className="flex-1 border-r border-border bg-muted/30 flex flex-col overflow-hidden">
             {selectedImage ? (
               <>
-                <div className="flex-1 bg-muted/30 flex items-center justify-center p-8">
-                  <div className="max-w-4xl max-h-full flex items-center justify-center">
+                <div className="flex-1 flex items-center justify-center p-4 overflow-auto relative">
+                  <div className="max-w-full max-h-full flex items-center justify-center relative overflow-hidden">
                     {showTextOverlay && textLayers.length > 0 ? (
                       <TextOverlay
                         imageUrl={selectedImage.url}
@@ -1113,12 +1927,55 @@ export default function EditorPage() {
                         isSelecting={isSelecting}
                         onSelectionComplete={handleSelectionComplete}
                         onSelectionCancel={handleSelectionCancel}
+                        transforms={(selectedImage as any).transforms}
+                      />
+                    )}
+
+                    {/* Sticker Layer */}
+                    {stickers.length > 0 && (
+                      <StickerLayer
+                        stickers={stickers}
+                        onUpdateSticker={handleUpdateSticker}
+                        onDeleteSticker={handleDeleteSticker}
+                        selectedStickerId={selectedStickerId || undefined}
+                        onSelectSticker={setSelectedStickerId}
                       />
                     )}
                   </div>
                 </div>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Sparkles className="w-8 h-8 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-foreground mb-2">
+                    {isGenerationMode
+                      ? "Generate New Images"
+                      : "Select an Image"}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {isGenerationMode
+                      ? "Create images from text"
+                      : "Choose from left panel to edit"}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
 
-                <div className="h-80 border-t border-border bg-card/50">
+          {/* RIGHT COLUMN: Editing Tools & AI Commands */}
+          <div className="w-96 border-l border-border bg-card/50 flex flex-col overflow-hidden">
+            {selectedImage ? (
+              <>
+                {/* <div className="p-4 border-b border-border shrink-0">
+                  <h3 className="font-semibold text-foreground">
+                    {editMode === "manual" ? "Editing Tools" : "AI Commands"}
+                  </h3>
+                </div> */}
+
+                <div className="flex-1 overflow-y-auto">
                   {editMode === "manual" ? (
                     <EditingToolsPanel
                       selectedImage={selectedImage}
@@ -1147,6 +2004,11 @@ export default function EditorPage() {
                         }
                         setShowResizeModal(true);
                       }}
+                      onAddSticker={handleAddSticker}
+                      onResetFullImage={handleResetFullImage}
+                      onResetStickers={handleResetStickers}
+                      onResetTextLayers={handleResetTextLayers}
+                      onClearSelection={handleClearSelection}
                     />
                   ) : (
                     <CommandInterface
@@ -1157,20 +2019,10 @@ export default function EditorPage() {
                 </div>
               </>
             ) : (
-              <div className="flex-1 flex items-center justify-center">
+              <div className="flex-1 flex items-center justify-center p-4">
                 <div className="text-center">
-                  <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Sparkles className="w-8 h-8 text-muted-foreground" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-foreground mb-2">
-                    {isGenerationMode
-                      ? "Generate New Images"
-                      : "Select an Image to Edit"}
-                  </h3>
-                  <p className="text-muted-foreground">
-                    {isGenerationMode
-                      ? "Use the AI generator in the sidebar to create new images from text descriptions"
-                      : "Upload an image from the sidebar to start editing with natural language commands"}
+                  <p className="text-sm text-muted-foreground">
+                    Select an image to start editing
                   </p>
                 </div>
               </div>
@@ -1186,6 +2038,9 @@ export default function EditorPage() {
             onComplete={handleProcessingComplete}
           />
         )}
+
+        {/* Loading Overlay */}
+        <LoadingOverlay isVisible={isGenerating} message={loadingMessage} />
       </div>
     </>
   );

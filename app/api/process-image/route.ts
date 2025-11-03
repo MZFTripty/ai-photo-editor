@@ -1,143 +1,307 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { GoogleGenAI } from "@google/genai"
+import { type NextRequest, NextResponse } from "next/server";
+import axios from "axios";
+import FormData from "form-data";
+import { processImageLocally } from "@/lib/local-advanced-processing";
 
-// Initialize Gemini AI with the provided API key
-const genAI = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-})
+// Get API key from environment variable
+const STABILITY_API_KEY = process.env.STABILITY_API_KEY;
+
+// Validate that API key is configured
+if (!STABILITY_API_KEY) {
+  console.error(
+    "❌ STABILITY_API_KEY is not configured in environment variables"
+  );
+}
 
 interface ProcessImageRequest {
-  imageData: string // base64 encoded image
-  editInstructions: Array<{
-    type: "remove" | "add" | "modify" | "enhance" | "style" | "crop" | "lighting"
-    target: string
-    description: string
-    confidence: number
-    parameters?: Record<string, any>
-  }>
-  imageMetadata: {
-    name: string
-    type: string
-    size: number
-    dimensions?: { width: number; height: number }
-  }
+  imageData?: string; // base64 encoded image (deprecated, use imageUrl)
+  imageUrl?: string; // URL to image
+  maskData?: string; // base64 encoded mask (for selection editing)
+  editInstructions?: Array<{
+    type:
+      | "remove"
+      | "add"
+      | "modify"
+      | "enhance"
+      | "style"
+      | "crop"
+      | "lighting";
+    target: string;
+    description: string;
+    confidence: number;
+    parameters?: Record<string, any>;
+  }>;
+  imageMetadata?: {
+    name: string;
+    type: string;
+    size: number;
+    dimensions?: { width: number; height: number };
+  };
+  prompt?: string; // Direct prompt for editing
 }
 
 interface ProcessImageResponse {
-  success: boolean
-  processedImageData?: string // base64 encoded processed image
-  processingTime: number
-  appliedEdits: string[]
-  error?: string
+  success: boolean;
+  processedImageUrl?: string; // data URL or blob URL
+  processedImageData?: string; // base64 encoded processed image (legacy)
+  processingTime: number;
+  appliedEdits: string[];
+  error?: string;
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body: ProcessImageRequest = await request.json()
-    const { imageData, editInstructions, imageMetadata } = body
+    const contentType = request.headers.get("content-type") || "";
 
-    if (!imageData || !editInstructions || editInstructions.length === 0) {
+    let imageUrl: string | undefined;
+    let maskData: string | undefined;
+    let prompt: string | undefined;
+    let imageData: string | undefined;
+    let editInstructions: any[] | undefined;
+    let imageMetadata: any | undefined;
+
+    if (contentType.includes("application/json")) {
+      // JSON request
+      const body: ProcessImageRequest = await request.json();
+      imageUrl = body.imageUrl;
+      maskData = body.maskData;
+      prompt = body.prompt;
+      imageData = body.imageData;
+      editInstructions = body.editInstructions;
+      imageMetadata = body.imageMetadata;
+    } else if (contentType.includes("multipart/form-data")) {
+      // FormData request (for selection editing with mask)
+      const formData = await request.formData();
+      imageUrl = formData.get("imageUrl") as string;
+      imageData = formData.get("imageData") as string; // Get imageData if provided
+      prompt = formData.get("prompt") as string;
+
+      // Get mask as Blob/File
+      const maskBlob = formData.get("maskData") as Blob | null;
+      if (maskBlob) {
+        const maskBuffer = await maskBlob.arrayBuffer();
+        maskData = Buffer.from(maskBuffer).toString("base64");
+        console.log("[v0] Mask received as blob, converted to base64");
+      }
+    }
+
+    // Validate inputs
+    if (!imageUrl && !imageData) {
       return NextResponse.json({
         success: false,
-        error: "Image data and edit instructions are required",
+        error: "Image data or URL is required",
         processingTime: 0,
         appliedEdits: [],
-      } as ProcessImageResponse)
+      } as ProcessImageResponse);
     }
 
-    const startTime = Date.now()
+    const startTime = Date.now();
 
-    console.log("[v0] Processing image:", imageMetadata.name)
-    console.log("[v0] Edit instructions:", editInstructions)
+    console.log("[v0] Processing image with selection mask:", {
+      hasUrl: !!imageUrl,
+      hasMask: !!maskData,
+      hasPrompt: !!prompt,
+    });
 
     try {
-    const config = {
-      responseModalities: ["IMAGE", "TEXT"] as string[],
-    }
-    const model = "gemini-2.5-flash-image-preview"
+      // Get image data
+      let imageBase64: string;
 
-      const editPrompt = editInstructions.map((instruction) => `${instruction.description}`).join(". ")
-      const fullPrompt = `Please edit the provided image by applying these changes: ${editPrompt}. Keep all other elements of the original image intact and only apply the requested modifications. Maintain the same composition, style, and quality as the original image.`
-
-      console.log("[v0] Editing original image with prompt:", fullPrompt)
-
-      const imageBase64 = imageData.split(",")[1] // Remove data:image/jpeg;base64, prefix
-      const mimeType = imageData.split(";")[0].split(":")[1] // Extract mime type
-
-      const contents = [
-        {
-          role: "user" as const,
-          parts: [
-            {
-              text: fullPrompt,
-            },
-            {
-              inlineData: {
-                mimeType: mimeType,
-                data: imageBase64,
-              },
-            },
-          ],
-        },
-      ]
-
-      const response = await genAI.models.generateContentStream({
-        model,
-        config,
-        contents,
-      })
-
-      for await (const chunk of response) {
-        if (!chunk.candidates || !chunk.candidates[0].content || !chunk.candidates[0].content.parts) {
-          continue
+      if (imageData) {
+        // Use provided base64/data URL (prioritize this - comes from selection editing)
+        // Clean it: remove data URL prefix if present
+        imageBase64 = imageData.includes(",")
+          ? imageData.split(",")[1]
+          : imageData;
+        console.log("[v0] Using imageData from FormData:", {
+          dataLength: imageBase64.length,
+          hasPrefix: imageData.includes(","),
+        });
+      } else if (imageUrl) {
+        // Only try to fetch URL if it's not a blob URL
+        if (imageUrl.startsWith("blob:")) {
+          throw new Error(
+            "Cannot fetch blob URLs on server. Use imageData parameter instead."
+          );
         }
-
-        if (chunk.candidates?.[0]?.content?.parts?.[0]?.inlineData) {
-          const inlineData = chunk.candidates[0].content.parts[0].inlineData
-          const processedImageData = `data:${inlineData.mimeType};base64,${inlineData.data}`
-          const processingTime = Date.now() - startTime
-          const appliedEdits = editInstructions.map((instruction) => `${instruction.type}: ${instruction.description}`)
-
-          console.log("[v0] Successfully edited original image")
-
-          return NextResponse.json({
-            success: true,
-            processedImageData,
-            processingTime,
-            appliedEdits,
-          } as ProcessImageResponse)
-        }
+        // Fetch image from URL
+        const response = await axios.get(imageUrl, {
+          responseType: "arraybuffer",
+        });
+        imageBase64 = Buffer.from(response.data).toString("base64");
+        console.log("[v0] Fetched image from URL");
+      } else {
+        throw new Error("No image data available");
       }
 
-      console.log("[v0] No edited image returned from Gemini, using original")
-      const processingTime = Date.now() - startTime
-      const appliedEdits = editInstructions.map(
-        (instruction) => `${instruction.type}: ${instruction.description} (unable to process)`,
-      )
+      // Prepare editing prompt
+      const editingPrompt = prompt
+        ? prompt
+        : editInstructions
+            ?.map((instruction) => instruction.description)
+            .join(". ") || "Enhance the image";
 
+      console.log("[v0] 📝 Using prompt:", {
+        prompt: editingPrompt,
+        isCustom: !!prompt,
+        promptLength: editingPrompt.length,
+      });
+
+      // Use Stability AI's inpaint API with optional mask
+      const formDataApi = new FormData();
+
+      // IMPORTANT: Stability AI requires proper image buffer with PNG/JPEG format
+      // imageBase64 is clean base64 (no data URL prefix)
+      const imageBuffer = Buffer.from(imageBase64, "base64");
+      console.log("[v0] Image buffer created:", {
+        bufferLength: imageBuffer.length,
+        isBase64Encoded: true,
+      });
+
+      // Append image as PNG buffer (Stability AI expects proper image format)
+      formDataApi.append("image", imageBuffer, "image.png");
+      formDataApi.append("prompt", editingPrompt);
+      formDataApi.append("output_format", "webp");
+
+      // If mask is provided, append it (for selection-based editing)
+      if (maskData) {
+        try {
+          // maskData is already base64 from arrayBuffer conversion
+          const maskBuffer = Buffer.from(maskData, "base64");
+          formDataApi.append("mask", maskBuffer, "mask.png");
+          console.log("[v0] ✅ Using mask for selection-specific editing", {
+            maskDataLength: maskData.length,
+            maskBufferLength: maskBuffer.length,
+            hasMask: true,
+          });
+        } catch (maskErr) {
+          console.error("[v0] ❌ Failed to process mask:", maskErr);
+          console.log("[v0] Falling back to full image edit (no mask)");
+        }
+      } else {
+        // No mask: edit entire image
+        console.log("[v0] No mask provided, editing entire image");
+        // Don't append strength when using inpaint with mask
+      }
+
+      console.log("[v0] 🚀 Making API call to Stability AI inpaint", {
+        hasImage: !!imageBuffer,
+        imageBufferSize: imageBuffer.length,
+        hasMask: !!maskData,
+        prompt: editingPrompt.substring(0, 50) + "...",
+      });
+
+      const apiResponse = await axios.post(
+        "https://api.stability.ai/v2beta/stable-image/edit/inpaint",
+        formDataApi,
+        {
+          validateStatus: undefined,
+          responseType: "arraybuffer",
+          headers: {
+            ...formDataApi.getHeaders(),
+            Authorization: `Bearer ${STABILITY_API_KEY}`,
+            Accept: "image/*",
+          },
+        }
+      );
+
+      const processingTime = Date.now() - startTime;
+      const appliedEdits = [
+        maskData ? "Selection-based edit applied" : "Full image edit applied",
+      ];
+
+      if (apiResponse.status === 200) {
+        // Convert buffer to base64
+        const buffer = Buffer.from(apiResponse.data);
+        const base64Image = buffer.toString("base64");
+        const processedImageUrl = `data:image/webp;base64,${base64Image}`;
+
+        console.log("[v0] Successfully edited image with Stability AI");
+
+        return NextResponse.json({
+          success: true,
+          processedImageUrl,
+          processedImageData: base64Image, // Legacy support
+          processingTime,
+          appliedEdits,
+        } as ProcessImageResponse);
+      } else {
+        const errorMessage = apiResponse.data.toString();
+        console.error("[v0] Stability AI editing error:", {
+          status: apiResponse.status,
+          message: errorMessage,
+        });
+
+        // Check if it's a credit/payment error (402)
+        if (apiResponse.status === 402) {
+          console.log(
+            "[v0] ⚠️ Credit exhausted - Using LOCAL processing instead"
+          );
+
+          try {
+            // Fallback to local processing
+            const localResult = await processImageLocally({
+              imageBuffer,
+              maskBuffer: maskData
+                ? Buffer.from(maskData, "base64")
+                : undefined,
+              command: editingPrompt,
+              width: 2000, // default, can be improved
+              height: 1333,
+            });
+
+            const base64Image = localResult.imageBuffer.toString("base64");
+            const processedImageUrl = `data:${localResult.mimeType};base64,${base64Image}`;
+
+            console.log(
+              "[v0] ✅ Local processing completed (credits exhausted)"
+            );
+
+            return NextResponse.json({
+              success: true,
+              processedImageUrl,
+              processedImageData: base64Image,
+              processingTime,
+              appliedEdits: [
+                "Local processing applied (AI credits exhausted - using manual filter)",
+              ],
+            } as ProcessImageResponse);
+          } catch (localError) {
+            console.error("[v0] Local processing also failed:", localError);
+            // Even local processing failed, return original
+            return NextResponse.json({
+              success: false,
+              error:
+                "AI credits exhausted and local processing failed. Please add credits.",
+              processingTime,
+              appliedEdits: [],
+            } as ProcessImageResponse);
+          }
+        }
+
+        // For other errors, return original image
+        return NextResponse.json({
+          success: true,
+          processedImageUrl: imageUrl || imageData,
+          processingTime,
+          appliedEdits: ["Fallback to original image (API error)"],
+        } as ProcessImageResponse);
+      }
+    } catch (apiError) {
+      console.error("[v0] Image editing API error:", apiError);
+
+      const processingTime = Date.now() - startTime;
+
+      // Fallback: return original image
       return NextResponse.json({
         success: true,
-        processedImageData: imageData, // Return original as fallback
+        processedImageUrl: imageUrl || imageData,
         processingTime,
-        appliedEdits,
-      } as ProcessImageResponse)
-    } catch (geminiError) {
-      console.error("[v0] Gemini processing error:", geminiError)
-
-      const processingTime = Date.now() - startTime
-      const appliedEdits = editInstructions.map(
-        (instruction) => `${instruction.type}: ${instruction.description} (Gemini unavailable)`,
-      )
-
-      return NextResponse.json({
-        success: true,
-        processedImageData: imageData, // Return original as fallback
-        processingTime,
-        appliedEdits,
-      } as ProcessImageResponse)
+        appliedEdits: ["API error - using original image"],
+      } as ProcessImageResponse);
     }
   } catch (error) {
-    console.error("[v0] Image processing error:", error)
+    console.error("[v0] Image processing error:", error);
 
     return NextResponse.json(
       {
@@ -146,7 +310,7 @@ export async function POST(request: NextRequest) {
         processingTime: 0,
         appliedEdits: [],
       } as ProcessImageResponse,
-      { status: 500 },
-    )
+      { status: 500 }
+    );
   }
 }

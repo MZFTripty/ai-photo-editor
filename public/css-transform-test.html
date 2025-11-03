@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D Transform CSS Test</title>
+    <style>
+      body {
+        display: flex;
+        gap: 20px;
+        padding: 20px;
+        background: #f0f0f0;
+        font-family: Arial, sans-serif;
+      }
+
+      .container {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .img-container {
+        width: 200px;
+        height: 150px;
+        background: white;
+        border: 1px solid #ccc;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        perspective: 1200px;
+      }
+
+      img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+      }
+
+      .test1 img {
+        transform: perspective(1200px) rotateZ(45deg);
+      }
+
+      .test2 img {
+        transform: perspective(1200px) skewZ(30deg);
+      }
+
+      .test3 img {
+        transform: perspective(1200px) rotateZ(45deg) skewZ(30deg);
+      }
+
+      .test4 img {
+        transform: perspective(1200px) rotateX(25deg) rotateY(50deg)
+          skew(15deg, 20deg) skewZ(30deg) rotateZ(90deg) scale(1.05);
+      }
+
+      label {
+        font-weight: bold;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <label>Test 1: rotateZ(45deg)</label>
+      <div class="img-container test1">
+        <img
+          src="data:image/svg+xml,%3Csvg width='200' height='150' xmlns='http://www.w3.org/2000/svg'%3E%3Crect fill='%23ff6b6b' width='200' height='150'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='white' font-size='20'%3E1%3C/text%3E%3C/svg%3E"
+          alt="test"
+        />
+      </div>
+    </div>
+
+    <div class="container">
+      <label>Test 2: skewZ(30deg)</label>
+      <div class="img-container test2">
+        <img
+          src="data:image/svg+xml,%3Csvg width='200' height='150' xmlns='http://www.w3.org/2000/svg'%3E%3Crect fill='%234ecdc4' width='200' height='150'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='white' font-size='20'%3E2%3C/text%3E%3C/svg%3E"
+          alt="test"
+        />
+      </div>
+    </div>
+
+    <div class="container">
+      <label>Test 3: rotateZ + skewZ</label>
+      <div class="img-container test3">
+        <img
+          src="data:image/svg+xml,%3Csvg width='200' height='150' xmlns='http://www.w3.org/2000/svg'%3E%3Crect fill='%2345b7d1' width='200' height='150'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='white' font-size='20'%3E3%3C/text%3E%3C/svg%3E"
+          alt="test"
+        />
+      </div>
+    </div>
+
+    <div class="container">
+      <label>Test 4: Complex</label>
+      <div class="img-container test4">
+        <img
+          src="data:image/svg+xml,%3Csvg width='200' height='150' xmlns='http://www.w3.org/2000/svg'%3E%3Crect fill='%239b59b6' width='200' height='150'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='white' font-size='20'%3E4%3C/text%3E%3C/svg%3E"
+          alt="test"
+        />
+      </div>
+    </div>
+
+    <script>
+      console.log("🎨 CSS Transform Test Page Loaded");
+      console.log(
+        "✅ If you see 4 rotated/skewed colored boxes, CSS transforms are working"
+      );
+      console.log(
+        "❌ If boxes appear normal (not transformed), CSS transforms are NOT supported"
+      );
+    </script>
+  </body>
+</html>

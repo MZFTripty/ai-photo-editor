@@ -21,6 +21,7 @@ import {
   Sticker,
   MousePointer,
   Pen,
+  Sparkles,
 } from "lucide-react";
 import {
   Collapsible,
@@ -51,6 +52,11 @@ interface EditingToolsPanelProps {
   onResetTransform?: () => void;
   onCropClick?: () => void;
   onResizeClick?: () => void;
+  onAddSticker?: (emoji: string, type: "emoji" | "shape") => void;
+  onResetFullImage?: () => void;
+  onResetStickers?: () => void;
+  onResetTextLayers?: () => void;
+  onClearSelection?: () => void;
 }
 
 export default function EditingToolsPanel({
@@ -66,6 +72,11 @@ export default function EditingToolsPanel({
   onResetTransform,
   onCropClick,
   onResizeClick,
+  onAddSticker,
+  onResetFullImage,
+  onResetStickers,
+  onResetTextLayers,
+  onClearSelection,
 }: EditingToolsPanelProps) {
   const [openSections, setOpenSections] = useState<string[]>(["basic"]);
 
@@ -100,8 +111,10 @@ export default function EditingToolsPanel({
   const [warpIntensity, setWarpIntensity] = useState<number[]>([0]);
   const [skewX, setSkewX] = useState<number[]>([0]);
   const [skewY, setSkewY] = useState<number[]>([0]);
+  const [skewZ, setSkewZ] = useState<number[]>([0]);
   const [perspectiveX, setPerspectiveX] = useState<number[]>([0]);
   const [perspectiveY, setPerspectiveY] = useState<number[]>([0]);
+  const [perspectiveZ, setPerspectiveZ] = useState<number[]>([0]);
 
   // Selection
   const [selectionMode, setSelectionMode] = useState<
@@ -155,6 +168,7 @@ export default function EditingToolsPanel({
 
   // Reset helpers
   const resetBasicAdjustments = () => {
+    console.log("✅ COMPONENT: Resetting Basic Adjustments - clearing sliders");
     setBrightness([0]);
     setContrast([0]);
     setHighlights([0]);
@@ -163,6 +177,7 @@ export default function EditingToolsPanel({
   };
 
   const resetColorControls = () => {
+    console.log("✅ COMPONENT: Resetting Color Controls - clearing sliders");
     setSaturation([0]);
     setVibrance([0]);
     setHue([0]);
@@ -174,8 +189,10 @@ export default function EditingToolsPanel({
     setWarpIntensity([0]);
     setSkewX([0]);
     setSkewY([0]);
+    setSkewZ([0]);
     setPerspectiveX([0]);
     setPerspectiveY([0]);
+    setPerspectiveZ([0]);
   };
 
   // Manual transforms
@@ -264,7 +281,7 @@ export default function EditingToolsPanel({
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Crop & Resize */}
-        <Collapsible
+        {/* <Collapsible
           open={openSections.includes("crop")}
           onOpenChange={() => toggleSection("crop")}
         >
@@ -333,7 +350,7 @@ export default function EditingToolsPanel({
               </Button>
             </div>
           </CollapsibleContent>
-        </Collapsible>
+        </Collapsible> */}
 
         <Separator />
 
@@ -522,8 +539,15 @@ export default function EditingToolsPanel({
                 size="sm"
                 variant="ghost"
                 onClick={() => {
+                  console.log(
+                    "🔄 COMPONENT: Reset Button Clicked - Basic Adjustments"
+                  );
                   resetBasicAdjustments();
+                  console.log(
+                    "🔄 COMPONENT: Calling parent onResetBasic callback"
+                  );
                   onResetBasic?.();
+                  console.log("🔄 COMPONENT: Reset complete");
                 }}
               >
                 Reset
@@ -655,8 +679,15 @@ export default function EditingToolsPanel({
                 size="sm"
                 variant="ghost"
                 onClick={() => {
+                  console.log(
+                    "🔄 COMPONENT: Reset Button Clicked - Color Controls"
+                  );
                   resetColorControls();
+                  console.log(
+                    "🔄 COMPONENT: Calling parent onResetColor callback"
+                  );
                   onResetColor?.();
+                  console.log("🔄 COMPONENT: Reset complete");
                 }}
               >
                 Reset
@@ -919,6 +950,22 @@ export default function EditingToolsPanel({
 
               <div>
                 <div className="flex justify-between items-center mb-1">
+                  <Label className="text-xs">Skew Z</Label>
+                  <span className="text-xs text-muted-foreground">
+                    {skewZ[0]}°
+                  </span>
+                </div>
+                <Slider
+                  value={skewZ}
+                  onValueChange={setSkewZ}
+                  max={45}
+                  min={-45}
+                  step={1}
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
                   <Label className="text-xs">Perspective X</Label>
                   <span className="text-xs text-muted-foreground">
                     {perspectiveX[0]}
@@ -948,6 +995,24 @@ export default function EditingToolsPanel({
                   step={1}
                 />
               </div>
+
+              {/*  */}
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <Label className="text-xs">Perspective Z</Label>
+                  <span className="text-xs text-muted-foreground">
+                    {perspectiveZ[0]}°
+                  </span>
+                </div>
+                <Slider
+                  value={perspectiveZ}
+                  onValueChange={setPerspectiveZ}
+                  max={180}
+                  min={-180}
+                  step={1}
+                />
+              </div>
             </div>
 
             <div className="flex gap-2">
@@ -955,28 +1020,121 @@ export default function EditingToolsPanel({
                 size="sm"
                 variant="outline"
                 className="flex-1 bg-transparent"
-                onClick={() =>
-                  handleApplyEdit("3d-transform", {
+                disabled={
+                  warpIntensity[0] === 0 &&
+                  skewX[0] === 0 &&
+                  skewY[0] === 0 &&
+                  skewZ[0] === 0 &&
+                  perspectiveX[0] === 0 &&
+                  perspectiveY[0] === 0 &&
+                  perspectiveZ[0] === 0
+                }
+                onClick={() => {
+                  console.log("✨ Applying 3D Transform with parameters:", {
                     warp: warpIntensity[0],
                     skewX: skewX[0],
                     skewY: skewY[0],
+                    skewZ: skewZ[0],
                     perspectiveX: perspectiveX[0],
                     perspectiveY: perspectiveY[0],
-                  })
-                }
+                    perspectiveZ: perspectiveZ[0],
+                  });
+
+                  const transformParams = {
+                    warp: warpIntensity[0],
+                    skewX: skewX[0],
+                    skewY: skewY[0],
+                    skewZ: skewZ[0],
+                    perspectiveX: perspectiveX[0],
+                    perspectiveY: perspectiveY[0],
+                    perspectiveZ: perspectiveZ[0],
+                  };
+
+                  console.log(
+                    "📤 Sending transform params to handleApplyEdit:",
+                    transformParams
+                  );
+
+                  if (handleApplyEdit) {
+                    console.log("✅ handleApplyEdit is defined, calling it...");
+                    handleApplyEdit("3d-transform", transformParams);
+                  } else {
+                    console.error("❌ ERROR: handleApplyEdit is NOT defined!");
+                  }
+                }}
               >
-                Apply Transform
+                {warpIntensity[0] === 0 &&
+                skewX[0] === 0 &&
+                skewY[0] === 0 &&
+                skewZ[0] === 0 &&
+                perspectiveX[0] === 0 &&
+                perspectiveY[0] === 0 &&
+                perspectiveZ[0] === 0
+                  ? "Apply Transform (No Changes)"
+                  : "✨ Apply Transform"}
               </Button>
               <Button
                 size="sm"
-                variant="ghost"
+                variant="destructive"
                 onClick={() => {
+                  console.log("🔄 Resetting 3D Transform");
                   reset3DTransform();
-                  onResetTransform?.();
+                  if (onResetTransform) {
+                    onResetTransform();
+                  } else {
+                    console.warn("⚠️ onResetTransform callback not provided");
+                  }
                 }}
               >
                 Reset
               </Button>
+            </div>
+
+            {/* Status Display */}
+            <div className="p-2 bg-muted/50 rounded-lg border border-border text-xs space-y-1">
+              <div>
+                <span className="text-muted-foreground">Warp:</span>{" "}
+                <span className="font-semibold">{warpIntensity[0]}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Skew X:</span>{" "}
+                <span className="font-semibold">{skewX[0]}°</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Skew Y:</span>{" "}
+                <span className="font-semibold">{skewY[0]}°</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Skew Z:</span>{" "}
+                <span className="font-semibold">{skewZ[0]}°</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Perspective X:</span>{" "}
+                <span className="font-semibold">{perspectiveX[0]}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Perspective Y:</span>{" "}
+                <span className="font-semibold">{perspectiveY[0]}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Perspective Z:</span>{" "}
+                <span className="font-semibold">{perspectiveZ[0]}°</span>
+              </div>
+              {warpIntensity[0] !== 0 ||
+              skewX[0] !== 0 ||
+              skewY[0] !== 0 ||
+              skewZ[0] !== 0 ||
+              perspectiveX[0] !== 0 ||
+              perspectiveY[0] !== 0 ||
+              perspectiveZ[0] !== 0 ? (
+                <div className="text-primary font-semibold pt-1 border-t border-border">
+                  ✓ Transform active
+                </div>
+              ) : (
+                <div className="text-muted-foreground pt-1 border-t border-border">
+                  No transform applied
+                </div>
+              )}
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -1049,93 +1207,260 @@ export default function EditingToolsPanel({
           </CollapsibleTrigger>
 
           <CollapsibleContent className="space-y-3 pt-3">
-            <div className="grid grid-cols-3 gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleApplyEdit("add-shape", { type: "circle" })}
-              >
-                ⭕ Circle
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleApplyEdit("add-shape", { type: "square" })}
-              >
-                ⬜ Square
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  handleApplyEdit("add-shape", { type: "triangle" })
-                }
-              >
-                🔺 Triangle
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleApplyEdit("add-shape", { type: "arrow" })}
-              >
-                ➡️ Arrow
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleApplyEdit("add-shape", { type: "star" })}
-              >
-                ⭐ Star
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleApplyEdit("add-shape", { type: "heart" })}
-              >
-                ❤️ Heart
-              </Button>
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-xs">Frames</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    handleApplyEdit("add-frame", { type: "border" })
-                  }
-                >
-                  Border Frame
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    handleApplyEdit("add-frame", { type: "vintage" })
-                  }
-                >
-                  Vintage Frame
-                </Button>
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs font-semibold">Shapes</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("⭕", "shape")}
+                  >
+                    ⭕ Circle
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("⬜", "shape")}
+                  >
+                    ⬜ Square
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("🔺", "shape")}
+                  >
+                    🔺 Triangle
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("⬛", "shape")}
+                  >
+                    ⬛ Filled
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("◯", "shape")}
+                  >
+                    ◯ Circle O
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("◆", "shape")}
+                  >
+                    ◆ Diamond
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("⬟", "shape")}
+                  >
+                    ⬟ Hexagon
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("🔹", "shape")}
+                  >
+                    🔹 Dot
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("▶️", "shape")}
+                  >
+                    ▶️ Play
+                  </Button>
+                </div>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-xs">Popular Emojis</Label>
-              <div className="grid grid-cols-4 gap-1">
-                {["😀", "😍", "🔥", "💯", "👍", "❤️", "🎉", "✨"].map(
-                  (emoji) => (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs font-semibold">Arrows & Lines</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("➡️", "shape")}
+                  >
+                    ➡️ Right
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("⬅️", "shape")}
+                  >
+                    ⬅️ Left
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("⬆️", "shape")}
+                  >
+                    ⬆️ Up
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("⬇️", "shape")}
+                  >
+                    ⬇️ Down
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("↩️", "shape")}
+                  >
+                    ↩️ Back
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("↪️", "shape")}
+                  >
+                    ↪️ Forward
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs font-semibold">Decorative</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("⭐", "shape")}
+                  >
+                    ⭐ Star
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("✨", "shape")}
+                  >
+                    ✨ Sparkle
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("❤️", "shape")}
+                  >
+                    ❤️ Heart
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("💫", "shape")}
+                  >
+                    💫 Dizzy
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("🌟", "shape")}
+                  >
+                    🌟 Gold
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAddSticker?.("💥", "shape")}
+                  >
+                    💥 Boom
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs font-semibold">Emojis - Faces</Label>
+                <div className="grid grid-cols-4 gap-1">
+                  {["😀", "😍", "😂", "🤣", "😘", "😜", "🤩", "😎"].map(
+                    (emoji) => (
+                      <Button
+                        key={emoji}
+                        size="sm"
+                        variant="outline"
+                        className="p-1 h-8 bg-transparent"
+                        onClick={() => onAddSticker?.(emoji, "emoji")}
+                      >
+                        {emoji}
+                      </Button>
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs font-semibold">
+                  Emojis - Popular
+                </Label>
+                <div className="grid grid-cols-4 gap-1">
+                  {["�", "�", "�", "🎉", "🎊", "�", "💎", "👏"].map((emoji) => (
                     <Button
                       key={emoji}
                       size="sm"
                       variant="outline"
                       className="p-1 h-8 bg-transparent"
-                      onClick={() => handleApplyEdit("add-emoji", { emoji })}
+                      onClick={() => onAddSticker?.(emoji, "emoji")}
                     >
                       {emoji}
                     </Button>
-                  )
-                )}
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs font-semibold">Emojis - Nature</Label>
+                <div className="grid grid-cols-4 gap-1">
+                  {["🌺", "🌸", "🌼", "🌻", "🌷", "🌹", "🍀", "🌿"].map(
+                    (emoji) => (
+                      <Button
+                        key={emoji}
+                        size="sm"
+                        variant="outline"
+                        className="p-1 h-8 bg-transparent"
+                        onClick={() => onAddSticker?.(emoji, "emoji")}
+                      >
+                        {emoji}
+                      </Button>
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs font-semibold">
+                  Emojis - Objects
+                </Label>
+                <div className="grid grid-cols-4 gap-1">
+                  {["🎁", "🎀", "🎈", "🎂", "�", "🎵", "�", "🎺"].map(
+                    (emoji) => (
+                      <Button
+                        key={emoji}
+                        size="sm"
+                        variant="outline"
+                        className="p-1 h-8 bg-transparent"
+                        onClick={() => onAddSticker?.(emoji, "emoji")}
+                      >
+                        {emoji}
+                      </Button>
+                    )
+                  )}
+                </div>
               </div>
             </div>
           </CollapsibleContent>
@@ -1151,7 +1476,7 @@ export default function EditingToolsPanel({
           <CollapsibleTrigger className="flex items-center justify-between w-full p-2 hover:bg-accent rounded-lg">
             <div className="flex items-center gap-2">
               <MousePointer className="w-4 h-4" />
-              <span className="font-medium">Selection Tools</span>
+              <span className="font-medium">Selection & Editing</span>
             </div>
             {openSections.includes("selection") ? (
               <ChevronDown className="w-4 h-4" />
@@ -1160,17 +1485,23 @@ export default function EditingToolsPanel({
             )}
           </CollapsibleTrigger>
 
-          <CollapsibleContent className="space-y-3 pt-3">
+          <CollapsibleContent className="space-y-4 pt-3">
+            {/* Selection Mode */}
             <div className="space-y-2">
-              <Label className="text-xs">Selection Mode</Label>
-              <div className="grid grid-cols-3 gap-1">
+              <Label className="text-xs font-semibold">Selection Mode</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Choose how to select area on your image
+              </p>
+              <div className="grid grid-cols-3 gap-2">
                 <Button
                   size="sm"
                   variant={selectionMode === "pen" ? "default" : "outline"}
                   onClick={() => setSelectionMode("pen")}
-                  className="p-1"
+                  className="flex flex-col items-center gap-1 h-auto py-2"
+                  title="Draw freehand selection"
                 >
-                  <Pen className="w-3 h-3" />
+                  <Pen className="w-4 h-4" />
+                  <span className="text-xs">Pen</span>
                 </Button>
                 <Button
                   size="sm"
@@ -1178,59 +1509,330 @@ export default function EditingToolsPanel({
                     selectionMode === "rectangle" ? "default" : "outline"
                   }
                   onClick={() => setSelectionMode("rectangle")}
-                  className="p-1"
+                  className="flex flex-col items-center gap-1 h-auto py-2"
+                  title="Draw rectangular selection"
                 >
-                  ⬜
+                  <span className="text-lg">⬜</span>
+                  <span className="text-xs">Rectangle</span>
                 </Button>
                 <Button
                   size="sm"
                   variant={selectionMode === "circle" ? "default" : "outline"}
                   onClick={() => setSelectionMode("circle")}
-                  className="p-1"
+                  className="flex flex-col items-center gap-1 h-auto py-2"
+                  title="Draw circular selection"
                 >
-                  ⭕
+                  <span className="text-lg">⭕</span>
+                  <span className="text-xs">Circle</span>
                 </Button>
               </div>
             </div>
 
-            <div>
-              <Label className="text-xs">Command for Selected Area</Label>
+            <Separator />
+
+            {/* Quick Selection Commands */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Quick Commands</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Pre-made editing commands for selections
+              </p>
+              <div className="grid grid-cols-2 gap-1">
+                {[
+                  { label: "Remove", icon: "🗑️", cmd: "remove this area" },
+                  { label: "Brighten", icon: "☀️", cmd: "brighten this area" },
+                  { label: "Darken", icon: "🌙", cmd: "darken this area" },
+                  {
+                    label: "Blur",
+                    icon: "💨",
+                    cmd: "apply blur to this area",
+                  },
+                  {
+                    label: "Enhance",
+                    icon: "✨",
+                    cmd: "enhance and sharpen this area",
+                  },
+                  {
+                    label: "Smooth",
+                    icon: "🧴",
+                    cmd: "smooth and soften this area",
+                  },
+                  {
+                    label: "Color Pop",
+                    icon: "🎨",
+                    cmd: "increase saturation in this area",
+                  },
+                  {
+                    label: "B&W",
+                    icon: "⚪",
+                    cmd: "convert this area to black and white",
+                  },
+                ].map(({ label, icon, cmd }) => (
+                  <Button
+                    key={label}
+                    size="sm"
+                    variant={selectionCommand === cmd ? "default" : "outline"}
+                    className="text-xs h-auto py-1.5 flex items-center gap-1"
+                    onClick={() => {
+                      console.log("📌 Quick command selected:", { label, cmd });
+                      setSelectionCommand(cmd);
+                    }}
+                    title={`Set command: ${cmd}`}
+                  >
+                    <span>{icon}</span>
+                    <span>{label}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Custom Command */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Custom Command</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Describe what you want to do with the selected area
+              </p>
               <Input
                 value={selectionCommand}
                 onChange={(e) => setSelectionCommand(e.target.value)}
-                placeholder="e.g., remove spot, change to blue sky..."
-                className="mt-1"
+                placeholder="e.g., remove the person, replace with blue sky..."
+                className="mt-1 text-sm"
               />
+              <p className="text-xs text-muted-foreground mt-1">
+                💡 Examples: "remove spots", "change color to red", "smooth
+                skin", "add glow effect"
+              </p>
             </div>
 
+            <Separator />
+
+            {/* Selection Instructions */}
+            <div className="space-y-3">
+              <Label className="text-xs font-semibold">How to Use</Label>
+              <div className="space-y-2 text-xs text-muted-foreground">
+                <div className="flex gap-2">
+                  <span className="font-bold text-primary">1</span>
+                  <span>Select mode (Pen, Rectangle, or Circle)</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="font-bold text-primary">2</span>
+                  <span>Click "Start Selection" button</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="font-bold text-primary">3</span>
+                  <span>Draw on image (click & drag, or draw freehand)</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="font-bold text-primary">4</span>
+                  <span>Choose quick command OR type custom command</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="font-bold text-primary">5</span>
+                  <span>Click "Apply to Selection" button</span>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Action Buttons */}
             <div className="space-y-2">
               <Button
                 size="sm"
-                variant="outline"
-                className="w-full bg-transparent"
+                variant="default"
+                className="w-full"
                 onClick={() => onStartSelection?.(selectionMode)}
+                disabled={!selectionMode}
               >
+                <MousePointer className="w-4 h-4 mr-2" />
                 Start Selection ({selectionMode})
               </Button>
 
+              {/* Apply Custom Command or Adjustments to Selection */}
               <Button
                 size="sm"
                 variant="outline"
-                className="w-full bg-transparent"
-                disabled={!selectionCommand.trim() || !currentSelection}
-                onClick={() =>
-                  onApplyToSelection?.(selectionCommand, currentSelection)
+                className="w-full"
+                disabled={
+                  !currentSelection ||
+                  (!selectionCommand.trim() &&
+                    brightness[0] === 0 &&
+                    contrast[0] === 0 &&
+                    saturation[0] === 0 &&
+                    exposure[0] === 0)
                 }
+                onClick={() => {
+                  // Build command from either custom command or adjustments
+                  let finalCommand = selectionCommand;
+
+                  console.log("🔍 Button clicked - initial state:", {
+                    selectionCommand,
+                    hasCurrentSelection: !!currentSelection,
+                    currentSelectionType: currentSelection?.type,
+                  });
+
+                  // If no custom command, build from adjustments
+                  if (
+                    !finalCommand.trim() &&
+                    (brightness[0] !== 0 ||
+                      contrast[0] !== 0 ||
+                      saturation[0] !== 0 ||
+                      exposure[0] !== 0)
+                  ) {
+                    const adjustments: string[] = [];
+                    if (brightness[0] > 0)
+                      adjustments.push(
+                        `increase brightness by ${brightness[0]}%`
+                      );
+                    if (brightness[0] < 0)
+                      adjustments.push(
+                        `decrease brightness by ${Math.abs(brightness[0])}%`
+                      );
+                    if (contrast[0] > 0)
+                      adjustments.push(`increase contrast by ${contrast[0]}%`);
+                    if (contrast[0] < 0)
+                      adjustments.push(
+                        `decrease contrast by ${Math.abs(contrast[0])}%`
+                      );
+                    if (saturation[0] > 0)
+                      adjustments.push(
+                        `increase saturation by ${saturation[0]}%`
+                      );
+                    if (saturation[0] < 0)
+                      adjustments.push(
+                        `decrease saturation by ${Math.abs(saturation[0])}%`
+                      );
+                    if (exposure[0] > 0)
+                      adjustments.push(`increase exposure by ${exposure[0]}%`);
+                    if (exposure[0] < 0)
+                      adjustments.push(
+                        `decrease exposure by ${Math.abs(exposure[0])}%`
+                      );
+                    finalCommand = adjustments.join(", ");
+                  }
+
+                  console.log("✨ Applying to selection:", {
+                    finalCommand,
+                    hasSelection: !!currentSelection,
+                    selectionType: currentSelection?.type,
+                    selectionBounds: currentSelection?.bounds,
+                  });
+                  onApplyToSelection?.(finalCommand, currentSelection);
+                }}
               >
+                <Sparkles className="w-4 h-4 mr-2" />
                 Apply to Selection
               </Button>
+
+              {/* DEBUG: Show current state */}
+              <div className="text-xs text-muted-foreground p-2 bg-muted/30 rounded">
+                <div>✓ Command: {selectionCommand ? "Set" : "Empty"}</div>
+                <div>
+                  ✓ Selection:{" "}
+                  {currentSelection ? `${currentSelection.type}` : "None"}
+                </div>
+              </div>
+
+              {currentSelection && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="w-full text-xs"
+                  onClick={() => {
+                    setSelectionCommand("");
+                  }}
+                >
+                  Clear Command
+                </Button>
+              )}
+
+              <Separator className="my-2" />
+
+              {/* Reset Options Panel */}
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold">🔄 Reset & Undo</Label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  সমস্যা হলে ধাপে ধাপে রিসেট করুন
+                </p>
+
+                {/* Full Reset */}
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="w-full"
+                  onClick={() => {
+                    console.log("🔴 Full Reset clicked");
+                    onResetFullImage?.();
+                  }}
+                >
+                  <span className="mr-2">🔴</span>
+                  সম্পূর্ণ ছবি রিসেট
+                </Button>
+
+                {/* Partial Resets */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-auto py-1.5"
+                    onClick={() => {
+                      console.log("🗑️ Reset Stickers clicked");
+                      onResetStickers?.();
+                    }}
+                  >
+                    <span className="mr-1">🗑️</span>
+                    স্টিকার
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-auto py-1.5"
+                    onClick={() => {
+                      console.log("📝 Reset Text clicked");
+                      onResetTextLayers?.();
+                    }}
+                  >
+                    <span className="mr-1">📝</span>
+                    টেক্সট
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-auto py-1.5 col-span-2"
+                    onClick={() => {
+                      console.log("❌ Clear Selection clicked");
+                      onClearSelection?.();
+                    }}
+                    disabled={!currentSelection}
+                  >
+                    <span className="mr-1">❌</span>
+                    সিলেকশন ক্লিয়ার
+                  </Button>
+                </div>
+
+                <div className="p-2 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800 text-xs text-blue-900 dark:text-blue-200">
+                  💡 কোন সমস্যা হলে উপরের বাটন দিয়ে রিসেট করুন
+                </div>
+              </div>
             </div>
 
-            <div className="text-xs text-muted-foreground p-2 bg-muted/30 rounded">
-              <p>1. Choose selection mode</p>
-              <p>2. Click "Start Selection" and draw on image</p>
-              <p>3. Enter command and apply</p>
-            </div>
+            {/* Status */}
+            {currentSelection && (
+              <div className="p-2 bg-primary/10 rounded-lg border border-primary/20">
+                <p className="text-xs font-medium text-primary">
+                  ✓ Selection active - Ready to apply command
+                </p>
+              </div>
+            )}
+
+            {!currentSelection && (
+              <div className="p-2 bg-muted rounded-lg border border-border">
+                <p className="text-xs text-muted-foreground">
+                  No selection active yet. Click "Start Selection" to begin.
+                </p>
+              </div>
+            )}
           </CollapsibleContent>
         </Collapsible>
       </div>
