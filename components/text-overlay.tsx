@@ -88,23 +88,18 @@ export default function TextOverlay({
   return (
     <div
       ref={containerRef}
-      className="relative w-full bg-black rounded-lg overflow-hidden"
+      className="relative w-full rounded-lg"
       style={{
         aspectRatio: imageWidth / imageHeight,
         cursor: draggingId ? "grabbing" : "default",
+        backgroundColor: "transparent",
+        pointerEvents: textLayers.length > 0 ? "auto" : "none",
       }}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
-      {/* Image */}
-      {imageUrl && (
-        <img
-          src={imageUrl}
-          alt="Editable"
-          className="w-full h-full object-cover"
-        />
-      )}
+      {/* No image - just text layers (image comes from SelectionCanvas below) */}
 
       {/* Text Layers */}
       {textLayers.map((layer) => {

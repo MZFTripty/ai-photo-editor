@@ -1923,38 +1923,42 @@ export default function EditorPage() {
               <>
                 <div className="flex-1 flex items-center justify-center p-4 overflow-auto relative">
                   <div className="max-w-full max-h-full flex items-center justify-center relative overflow-hidden">
-                    {showTextOverlay && textLayers.length > 0 ? (
-                      <TextOverlay
-                        imageUrl={selectedImage.url}
-                        textLayers={textLayers}
-                        selectedTextLayerId={selectedTextLayerId}
-                        onTextLayerUpdate={(layer) => {
-                          setTextLayers((prev) =>
-                            prev.map((t) => (t.id === layer.id ? layer : t))
-                          );
-                        }}
-                        onTextLayerDelete={(id) => {
-                          setTextLayers((prev) =>
-                            prev.filter((t) => t.id !== id)
-                          );
-                          if (selectedTextLayerId === id)
-                            setSelectedTextLayerId(null);
-                        }}
-                        onTextLayerSelect={setSelectedTextLayerId}
-                        imageWidth={selectedImage.dimensions?.width || 800}
-                        imageHeight={selectedImage.dimensions?.height || 600}
-                      />
-                    ) : (
-                      <SelectionCanvas
-                        imageUrl={selectedImage.url}
-                        selectionMode={selectionMode}
-                        isSelecting={isSelecting}
-                        onSelectionComplete={handleSelectionComplete}
-                        onSelectionCancel={handleSelectionCancel}
-                        transforms={(selectedImage as any).transforms}
-                        imageWidth={selectedImage.dimensions?.width || 800}
-                        imageHeight={selectedImage.dimensions?.height || 600}
-                      />
+                    {/* Base Canvas - Always shown for 3D transforms and selection tools */}
+                    <SelectionCanvas
+                      imageUrl={selectedImage.url}
+                      selectionMode={selectionMode}
+                      isSelecting={isSelecting}
+                      onSelectionComplete={handleSelectionComplete}
+                      onSelectionCancel={handleSelectionCancel}
+                      transforms={(selectedImage as any).transforms}
+                      imageWidth={selectedImage.dimensions?.width || 800}
+                      imageHeight={selectedImage.dimensions?.height || 600}
+                    />
+
+                    {/* Text Overlay - Layered on top of SelectionCanvas */}
+                    {showTextOverlay && textLayers.length > 0 && (
+                      <div className="absolute inset-0 w-full h-full">
+                        <TextOverlay
+                          imageUrl={selectedImage.url}
+                          textLayers={textLayers}
+                          selectedTextLayerId={selectedTextLayerId}
+                          onTextLayerUpdate={(layer) => {
+                            setTextLayers((prev) =>
+                              prev.map((t) => (t.id === layer.id ? layer : t))
+                            );
+                          }}
+                          onTextLayerDelete={(id) => {
+                            setTextLayers((prev) =>
+                              prev.filter((t) => t.id !== id)
+                            );
+                            if (selectedTextLayerId === id)
+                              setSelectedTextLayerId(null);
+                          }}
+                          onTextLayerSelect={setSelectedTextLayerId}
+                          imageWidth={selectedImage.dimensions?.width || 800}
+                          imageHeight={selectedImage.dimensions?.height || 600}
+                        />
+                      </div>
                     )}
 
                     {/* Sticker Layer */}
