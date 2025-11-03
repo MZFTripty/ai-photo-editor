@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
 
@@ -38,52 +38,84 @@ export default function TextOverlay({
 }: TextOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState({
+    x: 0,
+    y: 0,
+    startX: 0,
+    startY: 0,
+  });
 
-  const handleMouseDown = (
-    e: React.MouseEvent<HTMLDivElement>,
-    textId: string
-  ) => {
-    if (e.button !== 0) return; // Only left mouse button
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, textId: string) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
 
-    onTextLayerSelect(textId);
-    setDraggingId(textId);
+      onTextLayerSelect(textId);
+      setDraggingId(textId);
 
-    if (containerRef.current) {
+      // Store current position and mouse position
+      const layer = textLayers.find((t) => t.id === textId);
+      if (layer) {
+        setDragStart({
+          x: layer.x,
+          y: layer.y,
+          startX: e.clientX,
+          startY: e.clientY,
+        });
+      }
+    },
+    [textLayers, onTextLayerSelect]
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!draggingId || !containerRef.current) return;
+      e.preventDefault();
+
       const rect = containerRef.current.getBoundingClientRect();
-      setDragOffset({
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      });
-    }
-  };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!draggingId || !containerRef.current) return;
+      // Calculate delta from drag start
+      const deltaX = e.clientX - dragStart.startX;
+      const deltaY = e.clientY - dragStart.startY;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = Math.max(
-      0,
-      Math.min(e.clientX - rect.left - dragOffset.x, imageWidth)
-    );
-    const y = Math.max(
-      0,
-      Math.min(e.clientY - rect.top - dragOffset.y, imageHeight)
-    );
+      // New position = original position + delta
+      const newX = Math.max(0, Math.min(dragStart.x + deltaX, imageWidth));
+      const newY = Math.max(0, Math.min(dragStart.y + deltaY, imageHeight));
 
-    const layer = textLayers.find((t) => t.id === draggingId);
-    if (layer) {
-      onTextLayerUpdate({
-        ...layer,
-        x,
-        y,
-      });
-    }
-  };
+      const layer = textLayers.find((t) => t.id === draggingId);
+      if (layer) {
+        onTextLayerUpdate({
+          ...layer,
+          x: newX,
+          y: newY,
+        });
+      }
+    },
+    [
+      draggingId,
+      textLayers,
+      dragStart,
+      imageWidth,
+      imageHeight,
+      onTextLayerUpdate,
+    ]
+  );
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
     setDraggingId(null);
-  };
+  }, []);
+
+  // Document-level handlers for smooth dragging
+  React.useEffect(() => {
+    if (draggingId) {
+      document.addEventListener("mousemove", handleMouseMove as any);
+      document.addEventListener("mouseup", handleMouseUp as any);
+      return () => {
+        document.removeEventListener("mousemove", handleMouseMove as any);
+        document.removeEventListener("mouseup", handleMouseUp as any);
+      };
+    }
+  }, [draggingId, handleMouseMove, handleMouseUp]);
 
   return (
     <div
@@ -93,13 +125,10 @@ export default function TextOverlay({
         aspectRatio: imageWidth / imageHeight,
         cursor: draggingId ? "grabbing" : "default",
         backgroundColor: "transparent",
-        pointerEvents: "auto",
+        pointerEvents: "none",
       }}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
     >
-      {/* No image - just text layers (image comes from SelectionCanvas below) */}
+      {/* No image - just text layers */}
 
       {/* Text Layers */}
       {textLayers.map((layer) => {
@@ -112,18 +141,21 @@ export default function TextOverlay({
               left: `${layer.x}px`,
               top: `${layer.y}px`,
               transform: "translate(-50%, -50%)",
+              pointerEvents: "auto",
+              userSelect: "none",
+            }}
+            onMouseDown={(e) => handleMouseDown(e, layer.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTextLayerSelect(layer.id);
             }}
           >
-            {/* Text content wrapper with fixed positioning context */}
+            {/* Text content wrapper */}
             <div
               className={`relative inline-block cursor-grab active:cursor-grabbing transition-all ${
                 isSelected ? "ring-2 ring-blue-500 ring-offset-1" : ""
               }`}
-              onMouseDown={(e) => handleMouseDown(e, layer.id)}
-              onClick={(e) => {
-                e.stopPropagation();
-                onTextLayerSelect(layer.id);
-              }}
+              style={{ pointerEvents: "auto" }}
             >
               <div
                 style={{
@@ -139,7 +171,7 @@ export default function TextOverlay({
                 {layer.text}
               </div>
 
-              {/* Delete button - now positioned relative to text content container */}
+              {/* Delete button */}
               {isSelected && (
                 <button
                   onClick={(e) => {
@@ -148,6 +180,7 @@ export default function TextOverlay({
                   }}
                   className="absolute -top-3 -right-3 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center transition-colors shadow-lg"
                   title="Delete text"
+                  style={{ pointerEvents: "auto" }}
                 >
                   <X className="w-4 h-4" />
                 </button>
