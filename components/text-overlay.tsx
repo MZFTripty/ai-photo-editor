@@ -93,7 +93,7 @@ export default function TextOverlay({
         aspectRatio: imageWidth / imageHeight,
         cursor: draggingId ? "grabbing" : "default",
         backgroundColor: "transparent",
-        pointerEvents: textLayers.length > 0 ? "auto" : "none",
+        pointerEvents: "auto",
       }}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}

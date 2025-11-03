@@ -1937,7 +1937,7 @@ export default function EditorPage() {
 
                     {/* Text Overlay - Layered on top of SelectionCanvas */}
                     {showTextOverlay && textLayers.length > 0 && (
-                      <div className="absolute inset-0 w-full h-full">
+                      <div className="absolute inset-0 w-full h-full z-10 pointer-events-auto">
                         <TextOverlay
                           imageUrl={selectedImage.url}
                           textLayers={textLayers}
