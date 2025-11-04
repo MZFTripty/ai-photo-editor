@@ -1937,7 +1937,7 @@ export default function EditorPage() {
 
                     {/* Text Overlay - Layered on top of SelectionCanvas */}
                     {showTextOverlay && textLayers.length > 0 && (
-                      <div className="absolute inset-0 w-full h-full z-10 pointer-events-auto">
+                      <div className="absolute inset-0 w-full h-full z-10 pointer-events-none">
                         <TextOverlay
                           imageUrl={selectedImage.url}
                           textLayers={textLayers}
@@ -1963,13 +1963,15 @@ export default function EditorPage() {
 
                     {/* Sticker Layer */}
                     {stickers.length > 0 && (
-                      <StickerLayer
-                        stickers={stickers}
-                        onUpdateSticker={handleUpdateSticker}
-                        onDeleteSticker={handleDeleteSticker}
-                        selectedStickerId={selectedStickerId || undefined}
-                        onSelectSticker={setSelectedStickerId}
-                      />
+                      <div className="absolute inset-0 w-full h-full z-20 pointer-events-none">
+                        <StickerLayer
+                          stickers={stickers}
+                          onUpdateSticker={handleUpdateSticker}
+                          onDeleteSticker={handleDeleteSticker}
+                          selectedStickerId={selectedStickerId || undefined}
+                          onSelectSticker={setSelectedStickerId}
+                        />
+                      </div>
                     )}
                   </div>
                 </div>

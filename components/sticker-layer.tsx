@@ -139,7 +139,7 @@ export function StickerLayer({
   return (
     <div
       ref={containerRef}
-      className="absolute inset-0 pointer-events-auto"
+      className="absolute inset-0 pointer-events-none"
       style={{ cursor: draggingId ? "grabbing" : "default" }}
     >
       {stickers.map((sticker) => (
@@ -155,6 +155,7 @@ export function StickerLayer({
             zIndex: sticker.zIndex,
             width: `${sticker.size}px`,
             height: `${sticker.size}px`,
+            pointerEvents: "auto",
           }}
           onMouseDown={(e) => handleMouseDown(e, sticker.id, "drag")}
         >
@@ -173,6 +174,7 @@ export function StickerLayer({
           {selectedStickerId === sticker.id && (
             <div
               className="absolute -bottom-2 -right-2 w-5 h-5 bg-primary rounded-full cursor-se-resize shadow-lg flex items-center justify-center text-white text-xs font-bold"
+              style={{ pointerEvents: "auto" }}
               onMouseDown={(e) => handleMouseDown(e, sticker.id, "resize")}
               title="Drag to resize"
             >
@@ -184,6 +186,7 @@ export function StickerLayer({
           {selectedStickerId === sticker.id && (
             <button
               className="absolute -top-2 -right-2 w-5 h-5 bg-destructive rounded-full shadow-lg flex items-center justify-center hover:bg-destructive/80 transition-colors"
+              style={{ pointerEvents: "auto" }}
               onClick={(e) => {
                 e.stopPropagation();
                 onDeleteSticker(sticker.id);
