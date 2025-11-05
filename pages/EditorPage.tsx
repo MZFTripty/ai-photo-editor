@@ -1602,17 +1602,120 @@ export default function EditorPage() {
     }
 
     try {
-      // Create a download link
-      const link = document.createElement("a");
-      link.href = selectedImage.url;
-      link.download = selectedImage.name || "lumenframe-export.png";
+      // Create a canvas to composite all layers
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
 
-      // Trigger download
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      if (!ctx) {
+        throw new Error("Failed to get canvas context");
+      }
 
-      console.log("[v0] Image exported successfully:", selectedImage.name);
+      // Load the base image
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = selectedImage.url;
+      });
+
+      // Get the actual displayed image dimensions from the DOM
+      const imageContainer = document.querySelector(".max-w-full.max-h-full");
+      const displayedImage = imageContainer?.querySelector("img");
+
+      let displayWidth = selectedImage.dimensions?.width || 800;
+      let displayHeight = selectedImage.dimensions?.height || 600;
+
+      // If we can get actual displayed size, use it
+      if (displayedImage) {
+        const rect = displayedImage.getBoundingClientRect();
+        displayWidth = rect.width;
+        displayHeight = rect.height;
+      }
+
+      // Set canvas to match displayed size exactly
+      canvas.width = displayWidth;
+      canvas.height = displayHeight;
+
+      // Draw base image at display size
+      ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
+
+      // Draw stickers - positions are in percentage so they scale correctly
+      for (const sticker of stickers) {
+        ctx.save();
+
+        // Calculate actual position in pixels from percentage
+        const x = (sticker.x / 100) * canvas.width;
+        const y = (sticker.y / 100) * canvas.height;
+
+        // Apply transformations
+        ctx.translate(x, y);
+        ctx.rotate((sticker.rotation * Math.PI) / 180);
+
+        // Draw emoji/sticker as text
+        ctx.font = `${sticker.size * 0.8}px Arial`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(sticker.emoji, 0, 0);
+
+        ctx.restore();
+      }
+
+      // Draw text layers - need to account for container size
+      for (const layer of textLayers) {
+        ctx.save();
+
+        // Text positions are relative to the container size
+        // So we use them directly as they match the canvas size now
+        const x = layer.x;
+        const y = layer.y;
+
+        // Set font properties
+        ctx.font = `${layer.bold ? "bold" : "normal"} ${layer.fontSize}px ${
+          layer.fontFamily
+        }`;
+        ctx.fillStyle = layer.color;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        // Add text shadow
+        ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 2;
+
+        // Draw text
+        ctx.fillText(layer.text, x, y);
+
+        ctx.restore();
+      }
+
+      // Convert canvas to blob and download
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          throw new Error("Failed to create image blob");
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download =
+          selectedImage.name?.replace(/\.[^/.]+$/, "") + "-edited.png" ||
+          "lumenframe-export.png";
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // Clean up
+        URL.revokeObjectURL(url);
+
+        console.log(
+          "[v0] Image exported successfully with all layers:",
+          selectedImage.name
+        );
+      }, "image/png");
     } catch (error) {
       console.error("Failed to export image:", error);
       alert("Failed to export image. Please try again.");
