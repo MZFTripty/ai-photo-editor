@@ -29,22 +29,23 @@ interface GenerateImageResponse {
 }
 
 // Map aspect ratio to Stability AI format
-// Stability AI supports: 1:1, 16:9, 9:16, 4:3, 3:4, 21:9, 9:21
+// Stability AI Ultra supports: 1:1, 16:9, 21:9, 9:21, 2:3, 3:2, 4:5, 5:4, 9:16
 function mapAspectRatio(aspectRatio: string): string {
   const ratioMap: Record<string, string> = {
-    // Direct support
+    // Direct support from Stability AI Ultra
     "1:1": "1:1",
     "16:9": "16:9",
     "9:16": "9:16",
-    "4:3": "4:3",
-    "3:4": "3:4",
     "21:9": "21:9",
     "9:21": "9:21",
+    "3:2": "3:2",
+    "2:3": "2:3",
+    "5:4": "5:4",
+    "4:5": "4:5",
 
     // Map unsupported ratios to closest supported equivalent
-    "3:2": "16:9", // Photo -> Landscape (close enough)
-    "2:3": "9:16", // Panoramic -> Portrait
-    "5:4": "4:3", // Classic -> Standard
+    "4:3": "5:4", // Standard -> Classic (very close)
+    "3:4": "4:5", // Portrait standard -> Portrait classic
     custom: "1:1", // Custom -> Square (default)
     original: "1:1", // Original -> Square (default)
   };
@@ -134,9 +135,21 @@ export async function POST(request: NextRequest) {
           message: errorMessage,
         });
 
+        // Provide user-friendly error messages
+        let userMessage = "Failed to generate image";
+        if (response.status === 402) {
+          userMessage =
+            "AI Credits exhausted. Please purchase credits at https://platform.stability.ai/account/credits or use the manual editing tools.";
+        } else if (response.status === 400) {
+          userMessage =
+            "Invalid request. Please try a different prompt or settings.";
+        } else if (response.status === 401) {
+          userMessage = "API key is invalid. Please check your configuration.";
+        }
+
         return NextResponse.json({
           success: false,
-          error: `Stability AI API error (${response.status}): Failed to generate image`,
+          error: userMessage,
           prompt,
           generatedAt: new Date().toISOString(),
         } as GenerateImageResponse);

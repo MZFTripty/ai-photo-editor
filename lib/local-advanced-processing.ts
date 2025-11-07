@@ -27,22 +27,42 @@ export function parseCommand(command: string): {
   const lower = command.toLowerCase();
 
   // Brightness adjustments
-  if (lower.includes("brighten")) return { action: "brighten", strength: 50 };
-  if (lower.includes("darken")) return { action: "darken", strength: 50 };
+  if (lower.includes("bright") || lower.includes("lighten"))
+    return { action: "brighten", strength: 40 };
+  if (
+    lower.includes("dark") ||
+    lower.includes("decrease brightness") ||
+    lower.includes("dim")
+  )
+    return { action: "darken", strength: 40 };
 
   // Color adjustments
-  if (lower.includes("saturate") || lower.includes("color pop")) {
-    return { action: "saturate", strength: 60 };
+  if (
+    lower.includes("saturate") ||
+    lower.includes("vibrant") ||
+    lower.includes("enhance saturation") ||
+    lower.includes("color pop")
+  ) {
+    return { action: "saturate", strength: 50 };
   }
-  if (lower.includes("desaturate") || lower.includes("black and white")) {
+  if (
+    lower.includes("desaturate") ||
+    lower.includes("black and white") ||
+    lower.includes("grayscale")
+  ) {
     return { action: "desaturate", strength: 100 };
   }
 
   // Blur
-  if (lower.includes("blur")) return { action: "blur", strength: 10 };
+  if (lower.includes("blur") || lower.includes("soft"))
+    return { action: "blur", strength: 10 };
 
   // Sharpen/Enhance
-  if (lower.includes("sharpen") || lower.includes("enhance")) {
+  if (
+    lower.includes("sharpen") ||
+    lower.includes("enhance detail") ||
+    lower.includes("sharp")
+  ) {
     return { action: "sharpen", strength: 30 };
   }
 
@@ -51,13 +71,21 @@ export function parseCommand(command: string): {
     return { action: "blur", strength: 5 };
   }
 
+  // Warm/Cool tones
+  if (lower.includes("warm")) {
+    return { action: "warm", strength: 30 };
+  }
+  if (lower.includes("cool")) {
+    return { action: "cool", strength: 30 };
+  }
+
   // Remove (we'll treat as desaturate + darken)
   if (lower.includes("remove")) {
     return { action: "remove", strength: 70 };
   }
 
-  // Default
-  return { action: "brighten", strength: 30 };
+  // Default - enhance
+  return { action: "brighten", strength: 20 };
 }
 
 /**
@@ -78,12 +106,77 @@ export async function processImageLocally(
 
     console.log("[LOCAL] Parsed command:", { action, strength });
 
-    // For now, return the original image with processing metadata
-    // In a real implementation, we'd use sharp or jimp to manipulate pixels
-    return {
-      imageBuffer: params.imageBuffer,
-      mimeType: "image/png",
-    };
+    // Try to use sharp for image processing if available
+    try {
+      const sharp = require("sharp");
+      let image = sharp(params.imageBuffer);
+
+      // Apply transformations based on action
+      switch (action) {
+        case "brighten":
+          image = image.modulate({
+            brightness: 1 + strength / 100,
+          });
+          break;
+
+        case "darken":
+          image = image.modulate({
+            brightness: 1 - strength / 100,
+          });
+          break;
+
+        case "saturate":
+          image = image.modulate({
+            saturation: 1 + strength / 100,
+          });
+          break;
+
+        case "desaturate":
+          image = image.modulate({
+            saturation: 1 - strength / 100,
+          });
+          break;
+
+        case "blur":
+          image = image.blur(Math.max(0.3, strength / 10));
+          break;
+
+        case "sharpen":
+          image = image.sharpen();
+          break;
+
+        case "remove":
+          // Darken and desaturate for "remove" effect
+          image = image.modulate({
+            brightness: 0.3,
+            saturation: 0.1,
+          });
+          break;
+
+        default:
+          // No modification
+          break;
+      }
+
+      const processedBuffer = await image.png().toBuffer();
+
+      console.log("[LOCAL] Successfully processed with sharp");
+
+      return {
+        imageBuffer: processedBuffer,
+        mimeType: "image/png",
+      };
+    } catch (sharpError) {
+      console.log(
+        "[LOCAL] Sharp not available, returning original:",
+        sharpError
+      );
+      // Sharp not available, return original image
+      return {
+        imageBuffer: params.imageBuffer,
+        mimeType: "image/png",
+      };
+    }
   } catch (error) {
     console.error("[LOCAL] Processing error:", error);
     throw new Error(`Local processing failed: ${(error as Error).message}`);

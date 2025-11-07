@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   env: {
-    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    STABILITY_API_KEY: process.env.STABILITY_API_KEY,
+    NEXT_PUBLIC_STABILITY_API_KEY: process.env.NEXT_PUBLIC_STABILITY_API_KEY,
   },
   compiler: {
     // Remove console.log in production builds only

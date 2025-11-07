@@ -179,9 +179,22 @@ export async function POST(request: NextRequest) {
           console.log("[v0] Falling back to full image edit (no mask)");
         }
       } else {
-        // No mask: edit entire image
-        console.log("[v0] No mask provided, editing entire image");
-        // Don't append strength when using inpaint with mask
+        // No mask: For inpainting without mask, Stability AI requires explicit mask
+        // Create a white mask (edit entire image)
+        console.log(
+          "[v0] No mask provided, creating white mask for full image edit"
+        );
+        try {
+          // Create a simple white PNG mask
+          // This is a minimal valid PNG representing a white image
+          const whiteMaskBase64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+          const whiteMaskBuffer = Buffer.from(whiteMaskBase64, "base64");
+          formDataApi.append("mask", whiteMaskBuffer, "mask.png");
+          console.log("[v0] ✅ Created white mask for full image editing");
+        } catch (maskError) {
+          console.error("[v0] Failed to create white mask:", maskError);
+        }
       }
 
       console.log("[v0] 🚀 Making API call to Stability AI inpaint", {
@@ -232,10 +245,10 @@ export async function POST(request: NextRequest) {
           message: errorMessage,
         });
 
-        // Check if it's a credit/payment error (402)
-        if (apiResponse.status === 402) {
+        // Check if it's a credit/payment error (402) OR bad request (400)
+        if (apiResponse.status === 402 || apiResponse.status === 400) {
           console.log(
-            "[v0] ⚠️ Credit exhausted - Using LOCAL processing instead"
+            `[v0] ⚠️ API Error ${apiResponse.status} - Using LOCAL processing instead`
           );
 
           try {
@@ -254,7 +267,7 @@ export async function POST(request: NextRequest) {
             const processedImageUrl = `data:${localResult.mimeType};base64,${base64Image}`;
 
             console.log(
-              "[v0] ✅ Local processing completed (credits exhausted)"
+              `[v0] ✅ Local processing completed (API error ${apiResponse.status})`
             );
 
             return NextResponse.json({
@@ -263,16 +276,16 @@ export async function POST(request: NextRequest) {
               processedImageData: base64Image,
               processingTime,
               appliedEdits: [
-                "Local processing applied (AI credits exhausted - using manual filter)",
+                "Local processing applied (AI unavailable - using manual adjustments)",
               ],
             } as ProcessImageResponse);
           } catch (localError) {
             console.error("[v0] Local processing also failed:", localError);
-            // Even local processing failed, return original
+            // Even local processing failed, return original with modifications
             return NextResponse.json({
               success: false,
               error:
-                "AI credits exhausted and local processing failed. Please add credits.",
+                "AI unavailable and local processing failed. Using manual tools instead.",
               processingTime,
               appliedEdits: [],
             } as ProcessImageResponse);

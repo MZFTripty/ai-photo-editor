@@ -155,14 +155,13 @@ export function ImageGenerator({
     { value: "1:1", label: "Square (1:1)" },
     { value: "16:9", label: "Landscape (16:9)" },
     { value: "9:16", label: "Portrait (9:16)" },
-    { value: "4:3", label: "Standard (4:3)" },
     { value: "3:2", label: "Photo (3:2)" },
+    { value: "2:3", label: "Portrait Photo (2:3)" },
+    { value: "5:4", label: "Classic (5:4)" },
+    { value: "4:5", label: "Portrait Classic (4:5)" },
     { value: "21:9", label: "Cinematic (21:9)" },
     { value: "9:21", label: "Tall (9:21)" },
-    { value: "custom", label: "Custom" },
-    { value: "original", label: "Original" },
-    { value: "5:4", label: "Classic (5:4)" },
-    { value: "2:3", label: "Panoramic (2:3)" },
+    { value: "4:3", label: "Standard (4:3 → 5:4)" },
   ];
 
   const lightingOptions = [
